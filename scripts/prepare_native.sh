@@ -51,6 +51,72 @@ old_stop = "    stop_generation_position = current_position + user_prompt_size +
 if source.count(old_stop) != 1:
     raise SystemExit("Expected one generation stop-position calculation in ai_chat.cpp")
 source = source.replace(old_stop, "    stop_generation_position = current_position + n_predict;", 1)
+
+# Enable Jinja for custom model chat templates.
+old_jinja = 'g_chat_templates.get(), chat_msgs, new_msg, role == ROLE_USER, /* use_jinja */ false);'
+new_jinja = 'g_chat_templates.get(), chat_msgs, new_msg, role == ROLE_USER, /* use_jinja */ true);'
+if source.count(old_jinja) != 1:
+    raise SystemExit("Expected one chat-template Jinja call")
+source = source.replace(old_jinja, new_jinja, 1)
+
+if '#include <exception>' not in source:
+    include_anchor = '#include <cmath>\n'
+    if source.count(include_anchor) != 1:
+        raise SystemExit("Cannot locate C++ include section")
+    source = source.replace(
+        include_anchor,
+        include_anchor + '#include <exception>\n',
+        1
+    )
+
+old_system = """    if (has_chat_template) {
+        formatted_system_prompt = chat_add_and_format(ROLE_SYSTEM, system_prompt);
+    }
+    env->ReleaseStringUTFChars(jsystem_prompt, system_prompt);
+"""
+new_system = """    if (has_chat_template) {
+        try {
+            formatted_system_prompt = chat_add_and_format(ROLE_SYSTEM, system_prompt);
+        } catch (const std::exception & e) {
+            env->ReleaseStringUTFChars(jsystem_prompt, system_prompt);
+            LOGe("%s: Chat template formatting failed: %s", __func__, e.what());
+            return 3;
+        } catch (...) {
+            env->ReleaseStringUTFChars(jsystem_prompt, system_prompt);
+            LOGe("%s: Unknown chat template formatting failure", __func__);
+            return 3;
+        }
+    }
+    env->ReleaseStringUTFChars(jsystem_prompt, system_prompt);
+"""
+if source.count(old_system) != 1:
+    raise SystemExit("Expected one system-prompt formatting block")
+source = source.replace(old_system, new_system, 1)
+
+old_user = """    if (has_chat_template) {
+        formatted_user_prompt = chat_add_and_format(ROLE_USER, user_prompt);
+    }
+    env->ReleaseStringUTFChars(juser_prompt, user_prompt);
+"""
+new_user = """    if (has_chat_template) {
+        try {
+            formatted_user_prompt = chat_add_and_format(ROLE_USER, user_prompt);
+        } catch (const std::exception & e) {
+            env->ReleaseStringUTFChars(juser_prompt, user_prompt);
+            LOGe("%s: User prompt template formatting failed: %s", __func__, e.what());
+            return 3;
+        } catch (...) {
+            env->ReleaseStringUTFChars(juser_prompt, user_prompt);
+            LOGe("%s: Unknown user prompt template formatting failure", __func__);
+            return 3;
+        }
+    }
+    env->ReleaseStringUTFChars(juser_prompt, user_prompt);
+"""
+if source.count(old_user) != 1:
+    raise SystemExit("Expected one user-prompt formatting block")
+source = source.replace(old_user, new_user, 1)
+
 cpp.write_text(source)
 
 source = kotlin.read_text()

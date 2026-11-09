@@ -51,6 +51,10 @@ assert 'runFullApiTest' in developer and 'ModelRuntime.benchmark()' in developer
 runtime = (root / 'app/src/main/java/com/aram/ai/engine/ModelRuntime.kt').read_text()
 assert 'instance.state.first' in runtime and 'fun benchmark()' in runtime
 assert 'old_init_error' in (root / 'scripts/prepare_native.sh').read_text() and 'old_bench' in (root / 'scripts/prepare_native.sh').read_text()
+prepare = (root / 'scripts/prepare_native.sh').read_text()
+assert 'old_jinja' in prepare
+assert 'Chat template formatting failed' in prepare
+assert 'User prompt template formatting failed' in prepare
 print(f'Source verification passed: {len(required)} required files, XML resources, Gradle catalog, startup feedback, chat generation, and developer diagnostics.')
 PY
 bash -n scripts/prepare_native.sh
