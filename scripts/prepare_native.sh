@@ -67,12 +67,11 @@ if marker not in source:
         if count != 1:
             raise SystemExit(f"Expected exactly one {symbol}; found {count}")
 
-    old_truncate = """    int user_prompt_size = (int) user_tokens.size();
+    old_truncate = """    const int user_prompt_size = (int) user_tokens.size();
     const int max_batch_size = DEFAULT_CONTEXT_SIZE - OVERFLOW_HEADROOM;
     if (user_prompt_size > max_batch_size) {
         const int skipped_tokens = user_prompt_size - max_batch_size;
         user_tokens.resize(max_batch_size);
-        user_prompt_size = (int) user_tokens.size();
         LOGw("%s: User prompt too long! Skipped %d tokens!", __func__, skipped_tokens);
     }
 """
