@@ -8,7 +8,7 @@ import java.security.MessageDigest
 import java.security.SecureRandom
 import java.util.UUID
 
- data class ApiKeyRecord(
+data class ApiKeyRecord(
     val id: String,
     val name: String,
     val prefix: String,
@@ -19,7 +19,7 @@ import java.util.UUID
 
 data class IssuedApiKey(val secret: String, val record: ApiKeyRecord)
 
-/** Stores only SHA-256 digests. The plaintext token is returned once at creation time. */
+/** Persists only SHA-256 digests; the plaintext token is displayed once. */
 class ApiKeyStore(context: Context) {
     private val prefs = context.applicationContext.getSharedPreferences("aram_ai_api_keys", Context.MODE_PRIVATE)
     private val lock = Any()
@@ -27,8 +27,14 @@ class ApiKeyStore(context: Context) {
     fun issue(name: String): IssuedApiKey = synchronized(lock) {
         val bytes = ByteArray(32).also { SecureRandom().nextBytes(it) }
         val secret = "arai_" + Base64.encodeToString(bytes, Base64.URL_SAFE or Base64.NO_WRAP or Base64.NO_PADDING)
-        val id = UUID.randomUUID().toString()
-        val record = ApiKeyRecord(id, name.trim().ifBlank { "مفتاح جديد" }, secret.take(13), System.currentTimeMillis(), 0, false)
+        val record = ApiKeyRecord(
+            id = UUID.randomUUID().toString(),
+            name = name.trim().ifBlank { "مفتاح جديد" },
+            prefix = secret.take(13),
+            createdAt = System.currentTimeMillis(),
+            requests = 0,
+            revoked = false
+        )
         val json = readJson()
         json.put(toJson(record, digest(secret)))
         prefs.edit().putString("records", json.toString()).apply()

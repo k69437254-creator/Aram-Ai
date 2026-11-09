@@ -24,65 +24,118 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.cancel
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.sync.Mutex
+import kotlinx.coroutines.sync.withLock
 
 class ModelService : Service() {
     private val serviceScope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
-    private var apiServer: ApiHttpServer? = null
-    private var starting = false
+    @Volatile private var apiServer: ApiHttpServer? = null
+    @Volatile private var starting = false
+    @Volatile private var stopRequested = false
+    private val lifecycleMutex = Mutex()
     private var wakeLock: PowerManager.WakeLock? = null
 
     override fun onBind(intent: Intent?): IBinder? = null
+
+    override fun onCreate() {
+        super.onCreate()
+        serviceAlive = true
+    }
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
         if (intent?.action == ACTION_STOP) {
             stopEngine()
             return START_NOT_STICKY
         }
-        if (intent == null && !AppPrefs.isRunning(this)) {
+
+        try {
+            AppPrefs.setEngineState(this, "STARTING", "يجري بدء خدمة المحرك…")
+            startForegroundCompat()
+            acquireCpuWakeLock()
+        } catch (error: Exception) {
+            active = false
+            AppPrefs.setEngineState(this, "ERROR", "تعذر بدء خدمة Android: ${error.message ?: error.javaClass.simpleName}")
             stopSelf(startId)
             return START_NOT_STICKY
         }
-        startForegroundCompat()
-        acquireCpuWakeLock()
+
         if (!starting && apiServer == null) startEngine()
         return START_STICKY
     }
 
     private fun startEngine() {
+        if (starting || apiServer != null) return
+        stopRequested = false
         starting = true
+        AppPrefs.setEngineState(this, "LOADING_MODEL", "يجري تحميل النموذج في الذاكرة…")
+        updateNotification("يجري تحميل Spark-X2.6-1.7B…")
         serviceScope.launch {
-            try {
-                val model = ModelFiles.modelFile(this@ModelService)
-                ModelRuntime.load(this@ModelService, model)
-                val app = application as AramAiApplication
-                val host = if (AppPrefs.allowLan(this@ModelService)) "0.0.0.0" else "127.0.0.1"
-                val server = ApiHttpServer(host, app.apiKeyStore)
-                server.start(NanoHTTPD.SOCKET_READ_TIMEOUT, false)
-                apiServer = server
-                AppPrefs.setRunning(this@ModelService, true)
-                starting = false
-                updateNotification("النموذج يعمل · API على المنفذ 8765")
-            } catch (error: Exception) {
-                runCatching { ModelRuntime.unload() }
-                AppPrefs.setRunning(this@ModelService, false)
-                starting = false
-                updateNotification("تعذر تشغيل المحرك: ${error.message ?: "خطأ غير معروف"}")
-                stopForeground(STOP_FOREGROUND_REMOVE)
-                releaseCpuWakeLock()
-                stopSelf()
+            lifecycleMutex.withLock {
+                try {
+                    if (stopRequested) return@withLock
+                    val model = ModelFiles.modelFile(this@ModelService)
+                    require(model.isFile && model.length() >= ModelFiles.MIN_MODEL_BYTES) {
+                        "ملف النموذج غير موجود أو حجمه غير مكتمل. أعد تنزيله من الصفحة الرئيسية."
+                    }
+
+                    ModelRuntime.load(this@ModelService, model)
+                    if (stopRequested) {
+                        ModelRuntime.unload()
+                        starting = false
+                        active = false
+                        AppPrefs.setEngineState(this@ModelService, "STOPPED", "تم إلغاء التشغيل وتحرير الذاكرة")
+                        stopForeground(STOP_FOREGROUND_REMOVE)
+                        releaseCpuWakeLock()
+                        stopSelf()
+                        return@withLock
+                    }
+
+                    AppPrefs.setEngineState(this@ModelService, "STARTING_SERVER", "تم تحميل النموذج؛ يجري تشغيل خادم API…")
+                    updateNotification("تم تحميل النموذج · يجري تشغيل API…")
+
+                    val app = application as AramAiApplication
+                    val host = if (AppPrefs.allowLan(this@ModelService)) "0.0.0.0" else "127.0.0.1"
+                    val server = ApiHttpServer(host, app.apiKeyStore)
+                    server.start(NanoHTTPD.SOCKET_READ_TIMEOUT, false)
+                    apiServer = server
+
+                    starting = false
+                    active = true
+                    AppPrefs.setEngineState(this@ModelService, "READY", "المحرك جاهز · خادم API يعمل على المنفذ 8765")
+                    updateNotification("النموذج جاهز · API على المنفذ 8765")
+                } catch (error: Throwable) {
+                    starting = false
+                    active = false
+                    runCatching { apiServer?.stop() }
+                    apiServer = null
+                    runCatching { ModelRuntime.unload() }
+                    val detail = error.message ?: error.javaClass.simpleName
+                    AppPrefs.setEngineState(this@ModelService, "ERROR", "فشل تشغيل المحرك: $detail")
+                    updateNotification("فشل تشغيل Aram AI · افتح التطبيق للتفاصيل")
+                    stopForeground(STOP_FOREGROUND_REMOVE)
+                    releaseCpuWakeLock()
+                    stopSelf()
+                }
             }
         }
     }
 
     private fun stopEngine() {
+        stopRequested = true
+        active = false
+        AppPrefs.setEngineState(this, "STOPPING", "يجري إيقاف المحرك وتحرير الذاكرة…")
         serviceScope.launch {
-            runCatching { apiServer?.stop() }
-            apiServer = null
-            runCatching { ModelRuntime.unload() }
-            AppPrefs.setRunning(this@ModelService, false)
-            stopForeground(STOP_FOREGROUND_REMOVE)
-            releaseCpuWakeLock()
-            stopSelf()
+            lifecycleMutex.withLock {
+                runCatching { apiServer?.stop() }
+                apiServer = null
+                runCatching { ModelRuntime.unload() }
+                active = false
+                starting = false
+                AppPrefs.setEngineState(this@ModelService, "STOPPED", "المحرك متوقف وتم تحرير موارد التشغيل")
+                stopForeground(STOP_FOREGROUND_REMOVE)
+                releaseCpuWakeLock()
+                stopSelf()
+            }
         }
     }
 
@@ -111,8 +164,9 @@ class ModelService : Service() {
     }
 
     private fun updateNotification(text: String) {
-        val manager = getSystemService(NotificationManager::class.java)
-        manager.notify(NOTIFICATION_ID, buildNotification(text))
+        runCatching {
+            getSystemService(NotificationManager::class.java).notify(NOTIFICATION_ID, buildNotification(text))
+        }
     }
 
     private fun createNotificationChannel() {
@@ -142,10 +196,16 @@ class ModelService : Service() {
     }
 
     override fun onDestroy() {
+        active = false
+        serviceAlive = false
+        starting = false
         runCatching { apiServer?.stop() }
         apiServer = null
-        AppPrefs.setRunning(this, false)
         releaseCpuWakeLock()
+        val current = AppPrefs.engineStatus(this)
+        if (current.state != "ERROR" && current.state != "STOPPED") {
+            AppPrefs.setEngineState(this, "STOPPED", "توقفت خدمة المحرك")
+        }
         serviceScope.cancel()
         super.onDestroy()
     }
@@ -155,5 +215,9 @@ class ModelService : Service() {
         const val ACTION_STOP = "com.aram.ai.action.STOP"
         private const val CHANNEL_ID = "aram_ai_engine"
         private const val NOTIFICATION_ID = 4107
+        @Volatile var active: Boolean = false
+            private set
+        @Volatile var serviceAlive: Boolean = false
+            private set
     }
 }

@@ -22,8 +22,11 @@ class ApiHttpServer(
     override fun serve(session: IHTTPSession): Response {
         if (session.method == Method.OPTIONS) return json(Response.Status.OK, "{}")
         if (session.uri == "/health" && session.method == Method.GET) {
-            return json(Response.Status.OK, JSONObject().put("status", "ok")
-                .put("model_loaded", ModelRuntime.isLoaded()).put("model", ModelFiles.MODEL_ID).toString())
+            return json(Response.Status.OK, JSONObject()
+                .put("status", "ok")
+                .put("model_loaded", ModelRuntime.isLoaded())
+                .put("model", ModelFiles.MODEL_ID)
+                .toString())
         }
         if (session.uri == "/v1/models" && session.method == Method.GET) {
             val key = authenticate(session) ?: return unauthorized()
@@ -40,19 +43,22 @@ class ApiHttpServer(
         val key = authenticate(session) ?: return unauthorized()
         val contentLength = session.headers.entries.firstOrNull { it.key.equals("content-length", true) }
             ?.value?.toLongOrNull() ?: 0L
-        if (contentLength > 1_048_576L) {
+        if (contentLength > MAX_BODY_BYTES) {
             return json(Response.Status.BAD_REQUEST, errorBody("request_too_large", "حجم الطلب يتجاوز 1 ميغابايت"))
         }
+
         return try {
             val bodyMap = HashMap<String, String>()
             session.parseBody(bodyMap)
             val rawBody = bodyMap["postData"] ?: "{}"
-            if (rawBody.toByteArray(StandardCharsets.UTF_8).size > 1_048_576) {
+            if (rawBody.toByteArray(StandardCharsets.UTF_8).size > MAX_BODY_BYTES) {
                 return json(Response.Status.BAD_REQUEST, errorBody("request_too_large", "حجم الطلب يتجاوز 1 ميغابايت"))
             }
             val request = JSONObject(rawBody)
             val messages = request.optJSONArray("messages") ?: JSONArray()
-            if (messages.length() == 0) return json(Response.Status.BAD_REQUEST, errorBody("invalid_request", "حقل messages مطلوب"))
+            if (messages.length() == 0) {
+                return json(Response.Status.BAD_REQUEST, errorBody("invalid_request", "حقل messages مطلوب"))
+            }
             val system = StringBuilder()
             val prompt = StringBuilder()
             for (i in 0 until messages.length()) {
@@ -112,7 +118,7 @@ class ApiHttpServer(
                             .put("created", created).put("model", ModelFiles.MODEL_ID)
                             .put("choices", JSONArray().put(JSONObject().put("index", 0)
                                 .put("delta", JSONObject().put("content", token)).put("finish_reason", JSONObject.NULL)))
-                        output.write(("data: ${chunk}\n\n").toByteArray(StandardCharsets.UTF_8))
+                        output.write(("data: $chunk\n\n").toByteArray(StandardCharsets.UTF_8))
                         output.flush()
                     }
                 }
@@ -120,12 +126,12 @@ class ApiHttpServer(
                     .put("created", created).put("model", ModelFiles.MODEL_ID)
                     .put("choices", JSONArray().put(JSONObject().put("index", 0)
                         .put("delta", JSONObject()).put("finish_reason", "stop")))
-                output.write(("data: ${finish}\n\ndata: [DONE]\n\n").toByteArray(StandardCharsets.UTF_8))
+                output.write(("data: $finish\n\ndata: [DONE]\n\n").toByteArray(StandardCharsets.UTF_8))
                 output.flush()
             } catch (error: Exception) {
                 runCatching {
                     val payload = JSONObject().put("error", JSONObject().put("message", error.message ?: "generation failed"))
-                    output.write(("data: ${payload}\n\ndata: [DONE]\n\n").toByteArray(StandardCharsets.UTF_8))
+                    output.write(("data: $payload\n\ndata: [DONE]\n\n").toByteArray(StandardCharsets.UTF_8))
                 }
             } finally {
                 runCatching { output.close() }
@@ -152,4 +158,8 @@ class ApiHttpServer(
             addHeader("Access-Control-Allow-Headers", "Authorization, Content-Type")
             addHeader("Access-Control-Allow-Methods", "GET, POST, OPTIONS")
         }
+
+    companion object {
+        private const val MAX_BODY_BYTES = 1_048_576L
+    }
 }

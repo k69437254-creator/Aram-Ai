@@ -17,5 +17,5 @@ dependencyResolutionManagement {
 rootProject.name = "AramAI"
 include(":app", ":llama")
 
-// The official llama.cpp Android binding is fetched by GitHub Actions before Gradle starts.
+// GitHub Actions downloads the official llama.cpp Android binding before Gradle starts.
 project(":llama").projectDir = file("vendor/llama.cpp/examples/llama.android/lib")

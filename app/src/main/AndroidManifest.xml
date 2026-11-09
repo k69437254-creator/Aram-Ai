@@ -13,6 +13,7 @@
         android:icon="@drawable/ic_aram_ai"
         android:label="Aram AI"
         android:supportsRtl="true"
+        android:usesCleartextTraffic="true"
         android:theme="@style/Theme.AramAI">
         <activity
             android:name=".MainActivity"

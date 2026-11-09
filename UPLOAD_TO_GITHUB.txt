@@ -1,17 +1,19 @@
-ARAM AI — الرفع إلى مستودع GitHub عبر Termux
+ARAM AI 0.2.0 — تحديث مستودع GitHub من Termux
 
-قبل البدء:
-1) أنشئ مستودعًا جديدًا وفارغًا على GitHub باسم Aram-AI. لا تضف README أو License أو .gitignore من صفحة GitHub.
-2) نزّل ملف AramAI-source-v0.1.0.zip إلى الهاتف وفك ضغطه في Termux أو في مجلد يمكن لـTermux الوصول إليه.
-3) افتح مجلد AramAI في Termux.
+هذا الأرشيف تحديث كامل للمصدر، لكنه لا يحتوي مجلد .git حتى لا يستبدل تاريخ المستودع الحالي.
 
-نفّذ أمرًا واحدًا:
+1) فك ضغط محتويات الأرشيف مباشرة داخل ~/AramAI مع اختيار دمج/استبدال الملفات. لا تحذف مجلد .git المخفي.
+2) افتح Termux ونفّذ:
 
-   bash UPLOAD_TO_GITHUB.sh
+   cd ~/AramAI
+   bash PUSH_UPDATE.sh
 
-سيطلب منك رابط المستودع واسم وبريد Git author، ثم ينشئ commit ويرفع المشروع إلى فرع main. إذا طلب GitHub بيانات تسجيل الدخول، أكملها داخل Termux فقط؛ لا ترسل أي رمز وصول أو كلمة مرور في المحادثة.
+3) السكربت يتحقق من المستودع والفرع وعنوان origin، ويفحص ملفات XML وGradle والسكربتات، ثم ينشئ commit ويرفعه إلى main.
+4) افتح GitHub → Actions → Build Aram AI APK. بعد نجاح البناء نزّل artifact باسم Aram-AI-ARM64-debug-APK.
 
-بعد الرفع:
-GitHub → Actions → Build Aram AI APK → افتح آخر تشغيل ناجح → Artifacts → Aram-AI-ARM64-debug-APK.
-
-ملاحظة: هذا المسار يفترض مستودعًا فارغًا جديدًا. لا تشغّل السكربت داخل مستودع موجود أو مجلد يحتوي تاريخ Git سابقًا.
+مهم:
+- استخدم PUSH_UPDATE.sh للتحديث الحالي.
+- لا تستخدم UPLOAD_TO_GITHUB.sh؛ فهو مخصص لمستودع فارغ جديد فقط.
+- لا تحذف ~/.git ولا تنفذ git init أو force-push.
+- ملف النموذج GGUF لا يدخل في ZIP أو APK؛ يبقى محفوظًا داخل بيانات التطبيق على الهاتف.
+- لا ترسل مفاتيح API أو رموز GitHub إلى المحادثة.

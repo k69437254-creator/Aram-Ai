@@ -8,8 +8,7 @@ if [[ ! -f "$TARGET/examples/llama.android/lib/src/main/cpp/CMakeLists.txt" ]]; 
   git clone --depth 1 https://github.com/ggml-org/llama.cpp.git "$TARGET"
 fi
 
-# Tune the upstream Android example for a memory-constrained phone and make
-# each API request start from a clean chat context instead of sharing history.
+# Tune the upstream Android example for the target phone and isolate each API request.
 python3 - "$TARGET" <<'PY'
 from pathlib import Path
 import re
@@ -18,6 +17,8 @@ import sys
 root = Path(sys.argv[1])
 cpp = root / "examples/llama.android/lib/src/main/cpp/ai_chat.cpp"
 kotlin = root / "examples/llama.android/lib/src/main/java/com/arm/aichat/internal/InferenceEngineImpl.kt"
+if not cpp.is_file() or not kotlin.is_file():
+    raise SystemExit("The expected official llama.cpp Android binding files were not found; refusing a partial native patch.")
 
 source = cpp.read_text()
 for symbol, value in (("DEFAULT_CONTEXT_SIZE", "2048"), ("BATCH_SIZE", "256")):
@@ -25,7 +26,7 @@ for symbol, value in (("DEFAULT_CONTEXT_SIZE", "2048"), ("BATCH_SIZE", "256")):
     source, count = re.subn(pattern, f"constexpr int {symbol} = {value};", source)
     if count != 1:
         raise SystemExit(f"Expected one {symbol} constant in {cpp}, found {count}")
-# Keep token accounting correct when a prompt is truncated to the phone-sized context.
+
 old_cpp = """    const int user_prompt_size = (int) user_tokens.size();
     const int max_batch_size = DEFAULT_CONTEXT_SIZE - OVERFLOW_HEADROOM;
     if (user_prompt_size > max_batch_size) {
@@ -53,6 +54,11 @@ source = source.replace(old_stop, "    stop_generation_position = current_positi
 cpp.write_text(source)
 
 source = kotlin.read_text()
+old_init_error = '            } catch (e: Exception) {\n                Log.e(TAG, "Failed to load native library", e)\n                throw e\n            }\n'
+new_init_error = '            } catch (e: Throwable) {\n                Log.e(TAG, "Failed to load native library", e)\n                _state.value = InferenceEngine.State.Error(\n                    e as? Exception ?: RuntimeException("Native initialization failed", e)\n                )\n            }\n'
+if source.count(old_init_error) != 1:
+    raise SystemExit("Expected one native-library initialization error handler")
+source = source.replace(old_init_error, new_init_error, 1)
 patches = [
     (
         '            Log.i(TAG, "System prompt processed! Awaiting user prompt...")\n'
@@ -95,8 +101,27 @@ for old, new, label in patches:
     if count != 1:
         raise SystemExit(f"Expected one patch target for {label}, found {count}")
     source = source.replace(old, new, 1)
+
+old_bench = '''            _readyForSystemPrompt = false   // Just to be safe
+            _state.value = InferenceEngine.State.Benchmarking
+            benchModel(pp, tg, pl, nr).also {
+                _state.value = InferenceEngine.State.ModelReady
+            }
+'''
+new_bench = '''            _readyForSystemPrompt = false   // Just to be safe
+            _state.value = InferenceEngine.State.Benchmarking
+            try {
+                benchModel(pp, tg, pl, nr)
+            } finally {
+                _state.value = InferenceEngine.State.ModelReady
+                _readyForSystemPrompt = true
+            }
+'''
+if source.count(old_bench) != 1:
+    raise SystemExit("Expected one benchmark lifecycle block in InferenceEngineImpl.kt")
+source = source.replace(old_bench, new_bench, 1)
 kotlin.write_text(source)
-print("Applied Aram AI mobile-memory and per-request context patches.")
+print("Applied Aram AI phone-memory and per-request context patches.")
 PY
 
 printf 'Prepared official llama.cpp at %s\n' "$(git -C "$TARGET" rev-parse --short HEAD)"

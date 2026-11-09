@@ -10,8 +10,8 @@ object ModelFiles {
     const val MODEL_ID = "spark-x2.6-1.7b"
     const val MODEL_NAME = "Spark-X2.6-1.7B-Q4_K_M.gguf"
     const val MODEL_URL = "https://huggingface.co/XHToken/Spark-X2.6-1.7B-GGUF/resolve/main/Spark-X2.6-1.7B-Q4_K_M.gguf"
+    const val MIN_MODEL_BYTES = 1_500_000_000L
     private const val TEMP_NAME = "$MODEL_NAME.download"
-    private const val MIN_MODEL_BYTES = 1_500_000_000L
 
     fun modelFile(context: Context): File {
         val directory = context.getExternalFilesDir(Environment.DIRECTORY_DOWNLOADS)
@@ -25,10 +25,9 @@ object ModelFiles {
         return file.isFile && file.length() >= MIN_MODEL_BYTES
     }
 
-    /** Promote only a sufficiently large completed download; keep any previous valid model until then. */
+    /** Promote only a sufficiently large completed download; keep a previous valid file until then. */
     fun finalizeDownload(context: Context): Boolean {
-        val directory = context.getExternalFilesDir(Environment.DIRECTORY_DOWNLOADS)
-            ?: return false
+        val directory = context.getExternalFilesDir(Environment.DIRECTORY_DOWNLOADS) ?: return false
         val temporary = File(directory, TEMP_NAME)
         if (!temporary.isFile || temporary.length() < MIN_MODEL_BYTES) return false
         val destination = modelFile(context)

@@ -1,4 +1,4 @@
-# Aram AI API (v0.1)
+# Aram AI API (v0.2.0)
 
 Base URL on the phone: `http://127.0.0.1:8765`
 
@@ -10,11 +10,11 @@ Authorization: Bearer arai_<secret>
 
 ## GET `/health`
 
-Returns server readiness. This route does not return prompts, outputs, or key information.
+Returns `status`, `model_loaded` and model ID. It does not return prompts, output text or API key data.
 
 ## GET `/v1/models`
 
-Returns the active model in an OpenAI-style model list.
+Requires a valid Bearer key and returns the current model in a minimal OpenAI-style model list.
 
 ## POST `/v1/chat/completions`
 
@@ -32,27 +32,27 @@ Request:
 }
 ```
 
-- `model` is accepted for client compatibility; this device serves Spark-X2.6-1.7B.
-- `messages` is required.
-- `max_tokens` is clamped to 32–512 in this starter to limit device load.
-- `stream: true` returns Server-Sent Events (`text/event-stream`) and ends with `data: [DONE]`.
-- `stream: false` returns an OpenAI-style `choices[0].message.content` response.
-- Conversation turns are currently flattened into a text transcript. Native role-aware message formatting and tool-call objects are not yet implemented.
-- The native context is reset for every request, and that request's supplied messages are passed as the conversation transcript. This keeps separate API calls from inheriting another caller's conversation.
-- The initial native context is set to 2048 tokens to reduce memory pressure on the target phone; long histories are therefore truncated by the native binding.
-- Request bodies above 1 MiB are rejected.
+- `messages` is required; `model` is accepted for client compatibility. This device serves Spark-X2.6-1.7B.
+- `max_tokens` is clamped to 32–512 to bound phone workload.
+- `stream: false` returns an OpenAI-style `choices[0].message.content` result.
+- `stream: true` returns Server-Sent Events (`text/event-stream`), text deltas and a terminal `data: [DONE]` event.
+- Messages are flattened into a transcript prompt. Native role-aware templates and tool-call objects are not implemented.
+- Each request resets the model's system/context state through the guarded native binding patch; caller-supplied message history is what is passed as context.
+- Initial native context is 2048 tokens. Long transcripts can be truncated by the native binding.
+- Request body limit: 1 MiB.
+- Inference is serialized; simultaneous requests wait for the single native engine.
 
-## Example (same phone)
+## Same-device example
 
 ```bash
 curl http://127.0.0.1:8765/v1/chat/completions \
   -H 'Authorization: Bearer arai_REPLACE_WITH_YOUR_KEY' \
   -H 'Content-Type: application/json' \
-  -d '{"model":"spark-x2.6-1.7b","messages":[{"role":"user","content":"Explain a Kotlin coroutine."}],"max_tokens":160}'
+  -d '{"model":"spark-x2.6-1.7b","messages":[{"role":"user","content":"Explain a Kotlin coroutine."}],"max_tokens":128,"stream":false}'
 ```
 
 ## LAN clients
 
-Enable **Settings → Local network access** in the app, then restart the service. Use the phone's LAN IP as the host, for example `http://192.168.1.20:8765`.
+Enable **Settings → Local network access** and restart the service. Replace the host with the phone's Wi-Fi IP, for example `http://192.168.1.20:8765`.
 
-The v0.1 LAN listener is plain HTTP. It is suitable only for a trusted private Wi-Fi network. Do not send API keys across public Wi-Fi and do not expose this port directly to the internet.
+The LAN listener uses unencrypted HTTP. Use a trusted private network only. Do not expose this port directly to the internet.

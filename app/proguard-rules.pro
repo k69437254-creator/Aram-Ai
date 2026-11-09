@@ -1,2 +1,3 @@
+# Keep JNI binding classes and NanoHTTPD request/response classes available to native/reflection code.
 -keep class com.arm.aichat.** { *; }
--keepclasseswithmembernames class * { native <methods>; }
+-keep class fi.iki.elonen.** { *; }
