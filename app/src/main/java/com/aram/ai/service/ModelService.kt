@@ -18,6 +18,7 @@ import com.aram.ai.data.AppPrefs
 import com.aram.ai.data.ModelFiles
 import com.aram.ai.engine.ModelRuntime
 import com.aram.ai.server.ApiHttpServer
+import fi.iki.elonen.NanoHTTPD
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
@@ -56,7 +57,7 @@ class ModelService : Service() {
                 val app = application as AramAiApplication
                 val host = if (AppPrefs.allowLan(this@ModelService)) "0.0.0.0" else "127.0.0.1"
                 val server = ApiHttpServer(host, app.apiKeyStore)
-                server.start(SOCKET_READ_TIMEOUT, false)
+                server.start(NanoHTTPD.SOCKET_READ_TIMEOUT, false)
                 apiServer = server
                 AppPrefs.setRunning(this@ModelService, true)
                 starting = false
