@@ -13,7 +13,7 @@ android {
         applicationId = "com.aram.ai"
         minSdk = 33
         targetSdk = 36
-        versionCode = 2
+        versionCode = 3
         versionName = "0.2.0"
         ndk { abiFilters += listOf("arm64-v8a") }
     }
@@ -26,6 +26,9 @@ android {
     buildFeatures { compose = true }
 
     packaging {
+        jniLibs {
+            useLegacyPackaging = true
+        }
         resources.excludes += setOf("/META-INF/AL2.0", "/META-INF/LGPL2.1")
     }
 
