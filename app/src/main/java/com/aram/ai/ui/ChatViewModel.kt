@@ -42,9 +42,9 @@ class ChatViewModel : ViewModel() {
         private set
     private var activeJob: Job? = null
 
-    fun setDraft(value: String) { draft = value }
+    fun updateDraft(value: String) { draft = value }
     fun setMode(value: String) { selectedMode = value }
-    fun setMaxTokens(value: Int) { maxTokens = value.coerceIn(64, 512) }
+    fun updateMaxTokens(value: Int) { maxTokens = value.coerceIn(64, 512) }
 
     fun clearConversation() {
         if (!isGenerating) {

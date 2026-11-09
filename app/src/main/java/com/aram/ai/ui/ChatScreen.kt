@@ -135,7 +135,7 @@ fun ChatScreen(modifier: Modifier = Modifier) {
                 AssistChip(onClick = { showTokenMenu = true }, label = { Text("حد الإخراج: $maxTokens") })
                 DropdownMenu(expanded = showTokenMenu, onDismissRequest = { showTokenMenu = false }) {
                     listOf(64, 128, 256, 512).forEach { limit ->
-                        DropdownMenuItem(text = { Text("$limit رمز") }, onClick = { chat.setMaxTokens(limit); showTokenMenu = false })
+                        DropdownMenuItem(text = { Text("$limit رمز") }, onClick = { chat.updateMaxTokens(limit); showTokenMenu = false })
                     }
                 }
             }
@@ -158,7 +158,7 @@ fun ChatScreen(modifier: Modifier = Modifier) {
                             Text("أرسل سؤالًا، اطلب كتابة كود، أو اختبر قدرات النموذج. كل التوليد يتم محليًا على الهاتف.", color = Muted, textAlign = TextAlign.Center, style = MaterialTheme.typography.bodyMedium)
                             Text("أمثلة للبدء", color = Lilac, style = MaterialTheme.typography.labelLarge)
                             listOf("اشرح لي كيف تعمل الشبكات العصبية.", "اكتب دالة Python تتحقق من الأعداد الأولية.", "حلل هذه الفكرة واذكر نقاط ضعفها.").forEach { example ->
-                                OutlinedButton(onClick = { chat.setDraft(example) }, modifier = Modifier.fillMaxWidth(), shape = RoundedCornerShape(13.dp)) {
+                                OutlinedButton(onClick = { chat.updateDraft(example) }, modifier = Modifier.fillMaxWidth(), shape = RoundedCornerShape(13.dp)) {
                                     Text(example, maxLines = 2, style = MaterialTheme.typography.bodySmall)
                                 }
                             }
@@ -187,7 +187,7 @@ fun ChatScreen(modifier: Modifier = Modifier) {
                 Row(verticalAlignment = Alignment.Bottom, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                     OutlinedTextField(
                         value = draft,
-                        onValueChange = { chat.setDraft(it) },
+                        onValueChange = { chat.updateDraft(it) },
                         modifier = Modifier.weight(1f),
                         placeholder = { Text("اكتب رسالتك إلى النموذج…", color = Muted) },
                         minLines = 1,
