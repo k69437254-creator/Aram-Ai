@@ -180,41 +180,121 @@ if marker not in source:
 # which overrides the template's default true value.
 h = chat_h.read_text()
 h_marker = "// ARAM_AI_CHAT_TEMPLATE_KWARGS"
+
+header_pattern = re.compile(
+    r"(std::string\s+common_chat_format_single\s*\(\s*"
+    r"const struct common_chat_templates\s*\*\s*tmpls\s*,\s*"
+    r"const std::vector<common_chat_msg>\s*&\s*past_msg\s*,\s*"
+    r"const common_chat_msg\s*&\s*new_msg\s*,\s*"
+    r"bool\s+add_ass\s*,\s*bool\s+use_jinja)"
+    r"(?:\s*,\s*const std::map<std::string,\s*std::string>\s*&"
+    r"\s*chat_template_kwargs\s*=\s*\{\})?"
+    r"(\s*\);)", re.S
+)
+
+header_matches = list(header_pattern.finditer(h))
+if len(header_matches) != 1:
+    raise SystemExit(
+        f"Header signature count mismatch: {len(header_matches)}"
+    )
+
+if "chat_template_kwargs" not in header_matches[0].group(0):
+    h = header_pattern.sub(
+        r"\1, const std::map<std::string, std::string> & chat_template_kwargs = {}\2",
+        h, count=1
+    )
+
+if "#include <map>" not in h:
+    raise SystemExit("Missing <map> include in common/chat.h")
+
+header_matches = list(header_pattern.finditer(h))
+if len(header_matches) != 1 or "chat_template_kwargs" not in header_matches[0].group(0):
+    raise SystemExit("Header signature verification failed")
+
 if h_marker not in h:
-    if "chat_template_kwargs" not in h[h.find("common_chat_format_single"):h.find("common_chat_format_single") + 900]:
-        pattern = re.compile(
-            r"(std::string common_chat_format_single\(\s*const struct common_chat_templates \*\s*tmpls,\s*"
-            r"const std::vector<common_chat_msg> &\s*past_msg,\s*const common_chat_msg &\s*new_msg,\s*"
-            r"bool\s*add_ass,\s*bool\s*use_jinja)(\s*\);)", re.M)
-        replacement = r"\1, const std::map<std::string, std::string> & chat_template_kwargs = {}\2"
-        h, count = pattern.subn(replacement, h)
-        if count != 1:
-            raise SystemExit(f"Expected one chat format declaration, found {count}")
-    # chat.h's template inputs already contain std::map; enforce direct include if absent.
-    if "#include <map>" not in h:
-        h = h.replace("#include <string>\n", "#include <string>\n#include <map>\n", 1)
-    h = h.replace("std::string common_chat_format_single(", h_marker + "\nstd::string common_chat_format_single(", 1)
-    chat_h.write_text(h)
+    pos = header_matches[0].start()
+    h = h[:pos] + h_marker + "\n" + h[pos:]
 
 cc = chat_cpp.read_text()
 cc_marker = "// ARAM_AI_CHAT_TEMPLATE_KWARGS"
+
+implementation_pattern = re.compile(
+    r"(std::string\s+common_chat_format_single\s*\(\s*"
+    r"const struct common_chat_templates\s*\*\s*tmpls\s*,\s*"
+    r"const std::vector<common_chat_msg>\s*&\s*past_msg\s*,\s*"
+    r"const common_chat_msg\s*&\s*new_msg\s*,\s*"
+    r"bool\s+add_ass\s*,\s*bool\s+use_jinja)"
+    r"(?:\s*,\s*const std::map<std::string,\s*std::string>\s*&"
+    r"\s*chat_template_kwargs)?"
+    r"(\s*\)\s*\{)", re.S
+)
+
+implementation_matches = list(implementation_pattern.finditer(cc))
+if len(implementation_matches) != 1:
+    raise SystemExit(
+        f"Implementation signature count mismatch: {len(implementation_matches)}"
+    )
+
+if "chat_template_kwargs" not in implementation_matches[0].group(0):
+    cc = implementation_pattern.sub(
+        r"\1, const std::map<std::string, std::string> & chat_template_kwargs\2",
+        cc, count=1
+    )
+
+implementation_matches = list(implementation_pattern.finditer(cc))
+if len(implementation_matches) != 1:
+    raise SystemExit("Implementation signature verification failed")
+
+func_start = implementation_matches[0].start()
+func_end = cc.find(
+    "\nstd::string common_chat_format_example",
+    implementation_matches[0].end()
+)
+
+if func_end < 0:
+    raise SystemExit("Could not identify the end of the target function")
+
+function_body = cc[func_start:func_end]
+assignment = "    inputs.chat_template_kwargs = chat_template_kwargs;"
+
+if assignment not in function_body:
+    anchor = "    inputs.use_jinja = use_jinja;"
+    if function_body.count(anchor) != 1:
+        raise SystemExit("Cannot uniquely locate use_jinja initialization")
+
+    function_body = function_body.replace(
+        anchor, anchor + "\n" + assignment, 1
+    )
+    cc = cc[:func_start] + function_body + cc[func_end:]
+
 if cc_marker not in cc:
-    pattern = re.compile(
-        r"(std::string common_chat_format_single\(\s*const struct common_chat_templates \*\s*tmpls,\s*"
-        r"const std::vector<common_chat_msg> &\s*past_msg,\s*const common_chat_msg &\s*new_msg,\s*"
-        r"bool\s*add_ass,\s*bool\s*use_jinja)(\)\s*\{)", re.M)
-    replacement = r"\1, const std::map<std::string, std::string> & chat_template_kwargs\2"
-    if "chat_template_kwargs" not in cc[cc.find("common_chat_format_single"):cc.find("common_chat_format_single") + 1000]:
-        cc, count = pattern.subn(replacement, cc)
-        if count != 1:
-            raise SystemExit(f"Expected one chat format implementation, found {count}")
-    if "inputs.chat_template_kwargs = chat_template_kwargs;" not in cc:
-        anchor = "    inputs.use_jinja = use_jinja;\n    inputs.add_bos   = tmpls->add_bos;\n    inputs.add_eos   = tmpls->add_eos;\n"
-        if cc.count(anchor) != 1:
-            raise SystemExit("Cannot locate chat template input initialization")
-        cc = cc.replace(anchor, anchor + "    inputs.chat_template_kwargs = chat_template_kwargs;\n", 1)
-    cc = cc.replace("std::string common_chat_format_single(", cc_marker + "\nstd::string common_chat_format_single(", 1)
-    chat_cpp.write_text(cc)
+    pos = cc.index("std::string common_chat_format_single(")
+    cc = cc[:pos] + cc_marker + "\n" + cc[pos:]
+
+# Final checks before writing either file.
+hm = list(header_pattern.finditer(h))
+im = list(implementation_pattern.finditer(cc))
+
+if len(hm) != 1 or "chat_template_kwargs" not in hm[0].group(0):
+    raise SystemExit("Final header check failed")
+
+if len(im) != 1 or "chat_template_kwargs" not in im[0].group(0):
+    raise SystemExit("Final implementation check failed")
+
+fs = cc.index("std::string common_chat_format_single(")
+fe = cc.find("\nstd::string common_chat_format_example", fs)
+
+if fe < 0 or assignment not in cc[fs:fe]:
+    raise SystemExit("Final kwargs forwarding check failed")
+
+chat_h.write_text(h)
+chat_cpp.write_text(cc)
+
+print("PASS: exact header signature repaired.")
+print("PASS: exact implementation signature repaired.")
+print("PASS: chat_template_kwargs forwarded into template inputs.")
+print("PASS: existing markers handled independently of signatures.")
+
 
 # Recover the native wrapper's ready state after errors/cancellation.
 k = kotlin.read_text()
