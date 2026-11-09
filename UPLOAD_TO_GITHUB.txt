@@ -1,0 +1,17 @@
+ARAM AI — الرفع إلى مستودع GitHub عبر Termux
+
+قبل البدء:
+1) أنشئ مستودعًا جديدًا وفارغًا على GitHub باسم Aram-AI. لا تضف README أو License أو .gitignore من صفحة GitHub.
+2) نزّل ملف AramAI-source-v0.1.0.zip إلى الهاتف وفك ضغطه في Termux أو في مجلد يمكن لـTermux الوصول إليه.
+3) افتح مجلد AramAI في Termux.
+
+نفّذ أمرًا واحدًا:
+
+   bash UPLOAD_TO_GITHUB.sh
+
+سيطلب منك رابط المستودع واسم وبريد Git author، ثم ينشئ commit ويرفع المشروع إلى فرع main. إذا طلب GitHub بيانات تسجيل الدخول، أكملها داخل Termux فقط؛ لا ترسل أي رمز وصول أو كلمة مرور في المحادثة.
+
+بعد الرفع:
+GitHub → Actions → Build Aram AI APK → افتح آخر تشغيل ناجح → Artifacts → Aram-AI-ARM64-debug-APK.
+
+ملاحظة: هذا المسار يفترض مستودعًا فارغًا جديدًا. لا تشغّل السكربت داخل مستودع موجود أو مجلد يحتوي تاريخ Git سابقًا.

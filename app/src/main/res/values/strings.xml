@@ -1,0 +1,4 @@
+<resources>
+    <string name="app_name">Aram AI</string>
+    <string name="service_description">تشغيل نموذج ذكاء اصطناعي محلي وتقديم واجهة API بطلب من المستخدم</string>
+</resources>
