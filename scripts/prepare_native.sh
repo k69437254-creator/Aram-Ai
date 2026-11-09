@@ -200,9 +200,9 @@ cc = chat_cpp.read_text()
 cc_marker = "// ARAM_AI_CHAT_TEMPLATE_KWARGS"
 if cc_marker not in cc:
     pattern = re.compile(
-        r"std::string common_chat_format_single\(\s*const struct common_chat_templates \*\s*tmpls,\s*"
+        r"(std::string common_chat_format_single\(\s*const struct common_chat_templates \*\s*tmpls,\s*"
         r"const std::vector<common_chat_msg> &\s*past_msg,\s*const common_chat_msg &\s*new_msg,\s*"
-        r"bool\s*add_ass,\s*bool\s*use_jinja\)(\s*\{)", re.M)
+        r"bool\s*add_ass,\s*bool\s*use_jinja)(\)\s*\{)", re.M)
     replacement = r"\1, const std::map<std::string, std::string> & chat_template_kwargs\2"
     if "chat_template_kwargs" not in cc[cc.find("common_chat_format_single"):cc.find("common_chat_format_single") + 1000]:
         cc, count = pattern.subn(replacement, cc)
