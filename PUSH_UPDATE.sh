@@ -27,15 +27,40 @@ if [[ -f .git/MERGE_HEAD || -d .git/rebase-merge || -d .git/rebase-apply ]]; the
   exit 1
 fi
 
+# لا تخلط أي تغييرات مرحّلة مسبقًا مع تحديث 0.4.0.
+if ! git diff --cached --quiet; then
+  echo "توجد تغييرات مرحّلة مسبقًا. أوقف الرفع لمراجعتها أولًا."
+  git diff --cached --name-status
+  exit 1
+fi
+
 bash scripts/verify_source.sh
 
-git add -A
+# إضافة ملفات تحديث 0.4.0 المعتمدة فقط.
+git add -- \
+  PUSH_UPDATE.sh \
+  README.md \
+  app/build.gradle.kts \
+  app/src/main/java/com/aram/ai/MainActivity.kt \
+  app/src/main/java/com/aram/ai/data/ApiKeyStore.kt \
+  app/src/main/java/com/aram/ai/engine/ModelRuntime.kt \
+  app/src/main/java/com/aram/ai/server/ApiHttpServer.kt \
+  app/src/main/java/com/aram/ai/ui/ChatScreen.kt \
+  app/src/main/java/com/aram/ai/ui/ChatViewModel.kt \
+  app/src/main/java/com/aram/ai/ui/DeveloperScreen.kt \
+  scripts/prepare_native.sh \
+  scripts/verify_source.sh
+
+git diff --cached --check
+echo "===== FILES INCLUDED IN UPDATE ====="
+git diff --cached --name-status
+
 if git diff --cached --quiet; then
   echo "لا توجد تغييرات جديدة لرفعها."
   exit 0
 fi
 
-git commit -m "Add chat workspace and developer diagnostics"
+git commit -m "Aram AI 0.4.0: persistent chat and owner-priority API"
 git push origin "$BRANCH"
 echo
 echo "تم رفع تحديث Aram AI بنجاح. راقب GitHub Actions لبناء APK جديد."

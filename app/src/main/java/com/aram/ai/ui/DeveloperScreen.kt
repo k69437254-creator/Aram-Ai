@@ -55,6 +55,7 @@ fun DeveloperScreen(modifier: Modifier = Modifier) {
     var totalRam by remember { mutableStateOf("—") }
     var appRam by remember { mutableStateOf("—") }
     var modelBytes by remember { mutableStateOf("—") }
+    var pendingRequests by remember { mutableIntStateOf(0) }
     var busy by remember { mutableStateOf(false) }
     var stage by remember { mutableStateOf("") }
     var results by remember { mutableStateOf<List<Pair<Boolean, String>>>(emptyList()) }
@@ -76,6 +77,7 @@ fun DeveloperScreen(modifier: Modifier = Modifier) {
             appRam = "${processMemory.totalPss / 1024} MB"
             val model = ModelFiles.modelFile(context)
             modelBytes = if (model.exists()) formatBytes(model.length()) else "غير موجود"
+            pendingRequests = ModelRuntime.pendingRequestCount()
             delay(1500)
         }
     }
@@ -109,6 +111,7 @@ fun DeveloperScreen(modifier: Modifier = Modifier) {
                     MetricLine("ملف النموذج", modelBytes)
                     MetricLine("النموذج محمّل في الذاكرة", if (ModelRuntime.isLoaded()) "نعم" else "لا")
                     MetricLine("خدمة Android نشطة", if (ModelService.serviceAlive) "نعم" else "لا")
+                    MetricLine("طلبات التوليد المنتظرة", pendingRequests.toString())
                     MetricLine("مدة التشغيل", if (engineReady && status.startedAt > 0L) formatDuration(System.currentTimeMillis() - status.startedAt) else "—")
                     MetricLine("منفذ الخادم", "8765")
                     MetricLine("العنوان المحلي", API_BASE)
@@ -132,7 +135,7 @@ fun DeveloperScreen(modifier: Modifier = Modifier) {
                         Spacer(Modifier.width(8.dp))
                         Text("اختبارات القبول", fontWeight = FontWeight.Bold)
                     }
-                    Text("الاختبار الكامل ينفذ طلبات HTTP حقيقية إلى الخادم المحلي: فحص الصحة، قبول المفتاح الصحيح، رفض المفتاح الخاطئ، ثم توليد إجابة من النموذج. يُنشأ مفتاح مؤقت ويُلغى تلقائيًا.", color = Muted, style = MaterialTheme.typography.bodySmall)
+                    Text("الاختبار الكامل يفحص الصحة والمصادقة وتوليد الإجابة، ثم يختبر حصة العميل اليومية وسلوك مفتاح المالك. تُلغى مفاتيح الاختبار المؤقتة تلقائيًا.", color = Muted, style = MaterialTheme.typography.bodySmall)
                     Button(
                         onClick = {
                             if (busy) return@Button
@@ -223,7 +226,7 @@ fun DeveloperScreen(modifier: Modifier = Modifier) {
             Surface(color = Panel, shape = RoundedCornerShape(22.dp), modifier = Modifier.fillMaxWidth()) {
                 Column(Modifier.padding(18.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
                     Text("تفاصيل المطوّر", fontWeight = FontWeight.Bold)
-                    Text("الواجهة الحالية تستخدم واجهة Chat Completions محلية وتوليدًا متسلسلًا. لا يوجد حاليًا دعم فعلي لاستدعاء الأدوات (Tool Calling)، أو تعدد الطلبات بالتوازي، أو حدود الحصص، أو TLS، أو بوابة إنترنت عامة.", color = Muted, style = MaterialTheme.typography.bodySmall)
+                    Text("التوليد يعمل في طابور تسلسلي بأولوية للمالك على طلبات العملاء المنتظرة، مع حد انتظار لحماية الذاكرة. مفاتيح المالك بلا حصة يومية، ومفاتيح العملاء لها حصص منفصلة. لا يوجد حاليًا Tool Calling أو تنفيذ متوازٍ أو TLS أو بوابة إنترنت عامة.", color = Muted, style = MaterialTheme.typography.bodySmall)
                     Text("قياسات السرعة في شاشة المحادثة تعرض مقاطع التدفق المستلمة في الثانية، وليست قياسًا رسميًا لعدد رموز tokenizer في الثانية.", color = Lilac, style = MaterialTheme.typography.bodySmall)
                 }
             }
@@ -255,6 +258,24 @@ private fun runFullApiTest(context: Context): Pair<List<Pair<Boolean, String>>, 
     val issued = store.issue("اختبار مطوّر مؤقت")
     var sample = ""
     try {
+        val quotaProbe = store.issueClient("اختبار حصة مؤقت", 1)
+        val quotaPass = try {
+            val firstAllowed = store.consumeRequest(quotaProbe.record.id)
+            val secondBlocked = !store.consumeRequest(quotaProbe.record.id)
+            firstAllowed && secondBlocked
+        } finally {
+            store.revoke(quotaProbe.record.id)
+        }
+        results += quotaPass to if (quotaPass) "حصة العميل فُرضت: طلب واحد مقبول والثاني مرفوض." else "فشل اختبار الحصة اليومية لمفتاح العميل."
+
+        val ownerRecord = store.list().firstOrNull { it.isOwner && !it.revoked }
+        if (ownerRecord != null) {
+            val ownerPass = store.consumeRequest(ownerRecord.id) && store.consumeRequest(ownerRecord.id)
+            results += ownerPass to if (ownerPass) "مفتاح المالك قبل طلبين متتاليين دون حصة يومية." else "فشل اختبار تجاوز حصة المالك."
+        } else {
+            results += true to "اختبار حصة المالك مؤجل حتى إنشاء مفتاح المالك من شاشة مفاتيح API."
+        }
+
         val health = request("GET", "$API_BASE/health")
         val healthJson = runCatching { JSONObject(health.second) }.getOrNull()
         val healthy = health.first == 200 && healthJson?.optBoolean("model_loaded", false) == true

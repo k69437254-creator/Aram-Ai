@@ -299,6 +299,9 @@ private fun ApiKeysScreen(modifier: Modifier = Modifier) {
     val store = remember { (context.applicationContext as AramAiApplication).apiKeyStore }
     var keys by remember { mutableStateOf(store.list()) }
     var issued by remember { mutableStateOf<IssuedApiKey?>(null) }
+    var ownerExists by remember { mutableStateOf(store.ownerKeyExists()) }
+    var clientQuota by remember { mutableIntStateOf(100) }
+    var showQuotaMenu by remember { mutableStateOf(false) }
     val clipboard = context.getSystemService(Context.CLIPBOARD_SERVICE) as android.content.ClipboardManager
 
     LazyColumn(modifier.fillMaxSize(), contentPadding = PaddingValues(18.dp), verticalArrangement = Arrangement.spacedBy(14.dp)) {
@@ -306,13 +309,32 @@ private fun ApiKeysScreen(modifier: Modifier = Modifier) {
             Text("مفاتيح الوصول", style = MaterialTheme.typography.headlineSmall, fontWeight = FontWeight.Bold)
             Text("أنشئ مفتاحًا مستقلًا لكل تطبيق أو عميل. لن يُحفظ المفتاح السري داخل التطبيق بعد عرضه مرة واحدة.", color = Muted, style = MaterialTheme.typography.bodyMedium)
         }
+        if (!ownerExists) item {
+            Button(onClick = { issued = store.issueOwnerKey(); ownerExists = true; keys = store.list() }, modifier = Modifier.fillMaxWidth(), shape = RoundedCornerShape(15.dp), colors = ButtonDefaults.buttonColors(containerColor = Violet)) {
+                Icon(Icons.Rounded.Key, null); Spacer(Modifier.width(8.dp)); Text("إنشاء مفتاح المالك")
+            }
+        }
         item {
-            Button(onClick = { issued = store.issue("تطبيق جديد"); keys = store.list() }, modifier = Modifier.fillMaxWidth(), shape = RoundedCornerShape(15.dp), colors = ButtonDefaults.buttonColors(containerColor = Violet)) {
-                Icon(Icons.Rounded.Key, null); Spacer(Modifier.width(8.dp)); Text("إنشاء مفتاح API جديد")
+            Text("مفاتيح العملاء", fontWeight = FontWeight.SemiBold)
+            Text("كل مفتاح عميل له حصة يومية مستقلة. مفتاح المالك لا يخضع لهذه الحصة وله أولوية على طلبات العملاء المنتظرة.", color = Muted, style = MaterialTheme.typography.bodySmall)
+            Box {
+                OutlinedButton(onClick = { showQuotaMenu = true }, modifier = Modifier.fillMaxWidth()) { Text("الحصة اليومية للمفتاح الجديد: $clientQuota طلب") }
+                DropdownMenu(expanded = showQuotaMenu, onDismissRequest = { showQuotaMenu = false }) {
+                    listOf(100, 500, 1000, 5000).forEach { limit ->
+                        DropdownMenuItem(text = { Text("$limit طلب يوميًا") }, onClick = { clientQuota = limit; showQuotaMenu = false })
+                    }
+                }
+            }
+            Button(onClick = { issued = store.issueClient("تطبيق جديد", clientQuota); keys = store.list() }, modifier = Modifier.fillMaxWidth(), shape = RoundedCornerShape(15.dp), colors = ButtonDefaults.buttonColors(containerColor = Panel2, contentColor = Lilac)) {
+                Icon(Icons.Rounded.Key, null); Spacer(Modifier.width(8.dp)); Text("إنشاء مفتاح عميل")
             }
         }
         if (keys.isEmpty()) item { EmptyState("لا توجد مفاتيح بعد", "أنشئ مفتاحًا لربط تطبيقك بخادم Aram AI.") }
-        items(keys, key = { it.id }) { record -> ApiKeyCard(record) { store.revoke(record.id); keys = store.list() } }
+        items(keys, key = { it.id }) { record -> ApiKeyCard(record) {
+            store.revoke(record.id)
+            keys = store.list()
+            ownerExists = store.ownerKeyExists()
+        } }
     }
 
     issued?.let { newKey ->
@@ -339,16 +361,16 @@ private fun ApiKeyCard(record: ApiKeyRecord, onRevoke: () -> Unit) {
                 Icon(Icons.Rounded.Key, null, tint = Violet)
                 Spacer(Modifier.width(8.dp))
                 Column(Modifier.weight(1f)) {
-                    Text(record.name, fontWeight = FontWeight.SemiBold)
+                    Text(record.name + if (record.isOwner) " · المالك" else " · عميل", fontWeight = FontWeight.SemiBold)
                     Text("${record.prefix}••••••••", color = Muted, style = MaterialTheme.typography.bodySmall)
                 }
-                Text(if (record.revoked) "ملغى" else "نشط", color = if (record.revoked) Muted else Green, style = MaterialTheme.typography.labelMedium)
+                Text(if (record.revoked) "ملغى" else if (record.isOwner) "أولوية المالك" else "نشط", color = if (record.revoked) Muted else Green, style = MaterialTheme.typography.labelMedium)
             }
             Row(horizontalArrangement = Arrangement.SpaceBetween, modifier = Modifier.fillMaxWidth()) {
-                Text("الطلبات: ${record.requests}", color = Muted, style = MaterialTheme.typography.bodySmall)
+                Text(if (record.isOwner) "الطلبات: ${record.requests} · دون حصة" else "اليوم: ${record.requestsToday}/${record.dailyQuota} · الإجمالي: ${record.requests}", color = Muted, style = MaterialTheme.typography.bodySmall)
                 Text(DateFormat.getDateInstance(DateFormat.SHORT).format(Date(record.createdAt)), color = Muted, style = MaterialTheme.typography.bodySmall)
             }
-            if (!record.revoked) TextButton(onClick = onRevoke, modifier = Modifier.align(Alignment.Start)) { Text("إلغاء المفتاح", color = Danger) }
+            if (!record.revoked) TextButton(onClick = onRevoke, modifier = Modifier.align(Alignment.Start)) { Text(if (record.isOwner) "إلغاء/تدوير مفتاح المالك" else "إلغاء المفتاح", color = Danger) }
         }
     }
 }
@@ -377,9 +399,9 @@ private fun SettingsScreen(modifier: Modifier = Modifier) {
             Surface(color = Panel, shape = RoundedCornerShape(20.dp), modifier = Modifier.fillMaxWidth()) {
                 Column(Modifier.padding(18.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
                     Text("حول Aram AI", fontWeight = FontWeight.SemiBold)
-                    Text("الإصدار 0.2.0 · Spark-X2.6-1.7B · llama.cpp Android binding", color = Muted, style = MaterialTheme.typography.bodySmall)
+                    Text("الإصدار 0.4.0 · Spark-X2.6-1.7B · llama.cpp Android binding", color = Muted, style = MaterialTheme.typography.bodySmall)
                     Text("أثناء تشغيل الخادم يبقى المعالج مستيقظًا حتى مع إطفاء الشاشة؛ قد يزيد ذلك استهلاك البطارية.", color = Lilac, style = MaterialTheme.typography.bodySmall)
-                    Text("الوصول العام عبر الإنترنت، والحصص التجارية، والفوترة ليست مفعّلة في هذا الإصدار.", color = Muted, style = MaterialTheme.typography.bodySmall)
+                    Text("حصص مفاتيح العملاء اليومية مفعّلة محليًا. الوصول العام عبر الإنترنت وTLS والفوترة وإدارة العملاء التجارية المركزية ليست مفعّلة.", color = Muted, style = MaterialTheme.typography.bodySmall)
                 }
             }
         }

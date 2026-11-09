@@ -1,8 +1,22 @@
 # Aram AI — Android Local Inference
 
-**Aram AI 0.2.0** is an ARM64 Android application that hosts the Spark-X2.6-1.7B GGUF model locally using the official `llama.cpp` Android binding.
+**Aram AI 0.4.0** is an ARM64 Android application that hosts the Spark-X2.6-1.7B GGUF model locally using the official `llama.cpp` Android binding.
 
-## v0.2.0 additions
+## v0.4.0 additions
+
+- Persistent independent chat conversations: create, select, delete, clear, restore after process restart, and regenerate the most recent assistant response.
+- Improved chat feedback with first-chunk latency, incremental stream updates, stop handling, and explicit interrupted-generation recovery.
+- Three user-selectable task presets: ordinary (128 requested tokens), analysis (500), and programming (2,000); mode and budget are saved independently per conversation and can be manually overridden.
+- The app explicitly reports requested versus effective output budget. The effective cap stays at 512 until a larger context window and device memory/thermal behavior are measured; it does not claim that a 2,000-token run has been validated.
+- A continuation action submits a follow-up using the previous conversation, instead of replaying the original user request. Continuation is user-triggered because the current native API does not expose a reliable stop-reason/token-count signal.
+- Spark-X2.6 thinking disabled through the native Jinja `enable_thinking=false` template argument rather than post-processing generated text.
+- Corrected native output-stop accounting and reserved context space for the requested output while trimming older transcript content without dropping the opening chat-template marker.
+- A single serialized native generation queue with owner/local priority, bounded waiting capacity, and customer-request back-pressure. Priority affects waiting requests only; stopping the service drains the active native request before unloading to avoid cancelling JNI work mid-call.
+- One owner API key without a daily request quota, plus separate customer API keys with configurable daily quotas (100, 500, 1,000 or 5,000 requests).
+- Developer diagnostics now show queued requests and include quota/owner acceptance checks.
+- Keep the Spark-X2.6-compatible llama.cpp source revision already verified in this checkout; the updater no longer downgrades the submodule to an older incompatible commit.
+
+## Earlier v0.2.0 additions
 
 - Premium dark-violet Arabic RTL navigation with five sections: Home, Chat, Developer, API Keys, Settings.
 - A real local chat workspace connected directly to the loaded native inference engine. Responses are shown incrementally as the model emits output.

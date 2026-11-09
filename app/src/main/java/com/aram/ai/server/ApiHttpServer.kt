@@ -2,6 +2,7 @@ package com.aram.ai.server
 
 import com.aram.ai.data.ApiKeyStore
 import com.aram.ai.data.ModelFiles
+import com.aram.ai.engine.GenerationQueueFullException
 import com.aram.ai.engine.ModelRuntime
 import fi.iki.elonen.NanoHTTPD
 import kotlinx.coroutines.Dispatchers
@@ -30,7 +31,7 @@ class ApiHttpServer(
         }
         if (session.uri == "/v1/models" && session.method == Method.GET) {
             val key = authenticate(session) ?: return unauthorized()
-            keyStore.recordRequest(key.id)
+            if (!keyStore.consumeRequest(key.id)) return rateLimited()
             val data = JSONObject().put("object", "list").put("data", JSONArray().put(
                 JSONObject().put("id", ModelFiles.MODEL_ID).put("object", "model").put("owned_by", "aram-ai")
             ))
@@ -75,12 +76,13 @@ class ApiHttpServer(
             prompt.append("ASSISTANT:")
             val systemPrompt = system.toString().ifBlank { "أنت مساعد Aram AI. أجب بدقة ووضوح." }
             val maxTokens = request.optInt("max_tokens", 256).coerceIn(32, 512)
-            keyStore.recordRequest(key.id)
+            if (!keyStore.consumeRequest(key.id)) return rateLimited()
+            val priority = if (key.isOwner) OWNER_PRIORITY else CLIENT_PRIORITY
             if (request.optBoolean("stream", false)) {
-                streamResponse(prompt.toString(), systemPrompt, maxTokens)
+                streamResponse(prompt.toString(), systemPrompt, maxTokens, priority)
             } else {
                 val answer = runBlocking(Dispatchers.IO) {
-                    ModelRuntime.generate(prompt.toString(), systemPrompt, maxTokens) { }
+                    ModelRuntime.generate(prompt.toString(), systemPrompt, maxTokens, priority) { }
                 }
                 val response = JSONObject()
                     .put("id", "chatcmpl-${UUID.randomUUID()}")
@@ -93,6 +95,8 @@ class ApiHttpServer(
                         .put("finish_reason", "stop")))
                 json(Response.Status.OK, response.toString())
             }
+        } catch (error: GenerationQueueFullException) {
+            json(Response.Status.SERVICE_UNAVAILABLE, errorBody("queue_full", error.message ?: "طابور التوليد ممتلئ"))
         } catch (error: Exception) {
             json(Response.Status.INTERNAL_ERROR, errorBody("inference_error", error.message ?: "حدث خطأ أثناء التوليد"))
         }
@@ -105,7 +109,7 @@ class ApiHttpServer(
         keyStore.authenticate(token)
     }
 
-    private fun streamResponse(prompt: String, system: String, maxTokens: Int): Response {
+    private fun streamResponse(prompt: String, system: String, maxTokens: Int, priority: Int): Response {
         val input = PipedInputStream(64 * 1024)
         val output = PipedOutputStream(input)
         val id = "chatcmpl-${UUID.randomUUID()}"
@@ -113,7 +117,7 @@ class ApiHttpServer(
         Thread {
             try {
                 runBlocking(Dispatchers.IO) {
-                    ModelRuntime.generate(prompt, system, maxTokens) { token ->
+                    ModelRuntime.generate(prompt, system, maxTokens, priority) { token ->
                         val chunk = JSONObject().put("id", id).put("object", "chat.completion.chunk")
                             .put("created", created).put("model", ModelFiles.MODEL_ID)
                             .put("choices", JSONArray().put(JSONObject().put("index", 0)
@@ -148,6 +152,7 @@ class ApiHttpServer(
     }
 
     private fun unauthorized() = json(Response.Status.UNAUTHORIZED, errorBody("unauthorized", "مفتاح API مفقود أو غير صالح"))
+    private fun rateLimited() = json(TOO_MANY_REQUESTS, errorBody("quota_exceeded", "تم بلوغ الحصة اليومية لهذا المفتاح. أعد المحاولة بعد تجدد الحصة."))
 
     private fun errorBody(type: String, message: String) = JSONObject()
         .put("error", JSONObject().put("type", type).put("message", message)).toString()
@@ -161,5 +166,11 @@ class ApiHttpServer(
 
     companion object {
         private const val MAX_BODY_BYTES = 1_048_576L
+        private val TOO_MANY_REQUESTS = object : Response.IStatus {
+            override fun getRequestStatus(): Int = 429
+            override fun getDescription(): String = "Too Many Requests"
+        }
+        private const val OWNER_PRIORITY = 0
+        private const val CLIENT_PRIORITY = 10
     }
 }

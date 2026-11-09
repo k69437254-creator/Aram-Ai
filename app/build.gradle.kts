@@ -13,8 +13,8 @@ android {
         applicationId = "com.aram.ai"
         minSdk = 33
         targetSdk = 36
-        versionCode = 4
-        versionName = "0.2.1"
+        versionCode = 6
+        versionName = "0.4.0"
         ndk { abiFilters += listOf("arm64-v8a") }
     }
 
