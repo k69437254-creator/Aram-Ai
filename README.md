@@ -1,11 +1,19 @@
 # Aram AI — Android Local Inference
 
-**Aram AI 0.4.0** is an ARM64 Android application that hosts the Spark-X2.6-1.7B GGUF model locally using the official `llama.cpp` Android binding.
+**Aram AI 0.5.0** is an ARM64 Android application that hosts the Spark-X2.6-1.7B GGUF model locally using the official `llama.cpp` Android binding.
 
-## v0.4.0 additions
+## v0.5.0 additions
+
+- Dedicated full-screen chat room, independent from the app's main navigation, with a compact back control and animated enter/return transitions.
+- Redesigned message cards and a WhatsApp-inspired expandable composer. The single circular action changes from Send to Stop while generation is active.
+- Assistant output is buffered internally and displayed only after generation completes; canceling removes the in-progress indicator with a fade and persists no partial assistant answer.
+- Native cancellation is propagated to the active llama.cpp generation loop; queued customer requests are not canceled by a local chat stop.
+- Technical speed and token-rate statistics are hidden from the conversation UI.
+
+## Retained v0.4.0 capabilities
 
 - Persistent independent chat conversations: create, select, delete, clear, restore after process restart, and regenerate the most recent assistant response.
-- Improved chat feedback with first-chunk latency, incremental stream updates, stop handling, and explicit interrupted-generation recovery.
+- Serialized generation with internal token collection, explicit stop handling, and interrupted-generation cleanup.
 - Three user-selectable task presets: ordinary (128 requested tokens), analysis (500), and programming (2,000); mode and budget are saved independently per conversation and can be manually overridden.
 - The app explicitly reports requested versus effective output budget. The effective cap stays at 512 until a larger context window and device memory/thermal behavior are measured; it does not claim that a 2,000-token run has been validated.
 - A continuation action submits a follow-up using the previous conversation, instead of replaying the original user request. Continuation is user-triggered because the current native API does not expose a reliable stop-reason/token-count signal.
@@ -19,7 +27,7 @@
 ## Earlier v0.2.0 additions
 
 - Premium dark-violet Arabic RTL navigation with five sections: Home, Chat, Developer, API Keys, Settings.
-- A real local chat workspace connected directly to the loaded native inference engine. Responses are shown incrementally as the model emits output.
+- A local chat workspace connected directly to the loaded native inference engine. In v0.5.0, completed assistant responses are displayed as one finished message rather than streamed visibly.
 - Chat modes for general assistance, programming, and analysis; output limit presets; clear conversation; stop generation; copy responses; and visible generation timing.
 - A Developer console with current service/model state, live RAM readings, model file size, API endpoint, authentication checks, a real non-streaming generation test, and a separate Server-Sent Events test.
 - Foreground service states: STARTING, LOADING_MODEL, STARTING_SERVER, READY, STOPPING, STOPPED and ERROR. Android service-start exceptions and native-load/API-bind failures are surfaced in the UI and notification.
@@ -69,7 +77,7 @@ The workflow uses JDK 17, Android API 36, NDK 29.0.13113456, CMake 3.31.6 and Gr
 5. Open Developer → run the full API test. It checks `/health`, accepts a temporary valid key, rejects an invalid key, then sends a real generation request through `/v1/chat/completions`. A temporary test key is revoked automatically.
 6. Run the separate Streaming test to verify the Server-Sent Events endpoint.
 
-The chat composer is wired to `ModelRuntime.generate`, not a fake preview. The Developer screen sends real local HTTP requests to the in-app API. Actual successful inference still depends on the native library, available RAM and the phone's thermal/resource state.
+The dedicated chat-room composer is wired to `ModelRuntime.generate`, not a fake preview. Assistant text is committed to the conversation only after generation completes. The Developer screen sends real local HTTP requests to the in-app API. Actual successful inference still depends on the native library, available RAM and the phone's thermal/resource state.
 
 ## API quick start
 

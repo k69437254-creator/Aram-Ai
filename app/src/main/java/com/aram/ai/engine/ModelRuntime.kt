@@ -43,6 +43,8 @@ object ModelRuntime {
     ) {
         val result = CompletableDeferred<String>()
         @Volatile var activeJob: Job? = null
+        @Volatile var cancelRequested: Boolean = false
+        @Volatile var nativeStarted: Boolean = false
     }
 
     private val sequence = AtomicLong(0L)
@@ -122,8 +124,11 @@ object ModelRuntime {
         return try {
             request.result.await()
         } catch (cancelled: CancellationException) {
+            synchronized(request) {
+                request.cancelRequested = true
+                if (request.nativeStarted) engine?.cancelGeneration()
+            }
             request.result.cancel(cancelled)
-            request.activeJob?.cancel(cancelled)
             throw cancelled
         }
     }
@@ -146,8 +151,21 @@ object ModelRuntime {
                 }
             }
             request.activeJob = task
+            if (request.cancelRequested || request.result.isCancelled) {
+                synchronized(request) {
+                    request.cancelRequested = true
+                    if (request.nativeStarted) engine?.cancelGeneration()
+                }
+                task.cancel()
+            }
             request.result.invokeOnCompletion {
-                if (request.result.isCancelled) task.cancel()
+                if (request.result.isCancelled) {
+                    synchronized(request) {
+                        request.cancelRequested = true
+                        if (request.nativeStarted && request.activeJob === task) engine?.cancelGeneration()
+                    }
+                    task.cancel()
+                }
             }
             task.join()
             request.activeJob = null
@@ -159,6 +177,13 @@ object ModelRuntime {
         check(loaded) { "النموذج غير جاهز" }
         val output = StringBuilder()
         instance.setSystemPrompt(request.systemPrompt)
+        synchronized(request) {
+            if (request.cancelRequested || request.result.isCancelled) {
+                throw CancellationException("تم إلغاء الطلب قبل بدء التوليد")
+            }
+            instance.beginGeneration()
+            request.nativeStarted = true
+        }
         withContext(Dispatchers.Default) {
             instance.sendUserPrompt(request.prompt, request.maxTokens).collect { token ->
                 output.append(token)

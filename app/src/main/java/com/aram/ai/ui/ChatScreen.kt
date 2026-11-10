@@ -1,5 +1,12 @@
 package com.aram.ai.ui
 
+import androidx.compose.ui.text.TextStyle
+import androidx.compose.ui.graphics.SolidColor
+import androidx.compose.material.icons.rounded.ArrowUpward
+import androidx.compose.material.icons.rounded.ArrowForward
+import androidx.compose.foundation.text.BasicTextField
+import androidx.compose.animation.core.tween
+import androidx.compose.animation.AnimatedContent
 import android.content.ClipData
 import android.content.Context
 import android.content.Intent
@@ -60,7 +67,7 @@ private val UserBubble = Color(0xFF39265D)
 private val AssistantBubble = Color(0xFF191526)
 
 @Composable
-fun ChatScreen(modifier: Modifier = Modifier) {
+fun ChatScreen(onBack: () -> Unit, modifier: Modifier = Modifier) {
     val context = LocalContext.current
     val chat: ChatViewModel = viewModel()
     val listState = rememberLazyListState()
@@ -71,6 +78,7 @@ fun ChatScreen(modifier: Modifier = Modifier) {
     val mode = chat.selectedMode
     val maxTokens = chat.maxTokens
     val isGenerating = chat.isGenerating
+    val isCancelling = chat.isCancelling
     val error = chat.error
 
     var engineLoaded by remember { mutableStateOf(false) }
@@ -85,46 +93,52 @@ fun ChatScreen(modifier: Modifier = Modifier) {
             delay(700)
         }
     }
-    LaunchedEffect(messages.size, messages.lastOrNull()?.content?.length) {
+    LaunchedEffect(messages.size, messages.lastOrNull()?.content?.length, isGenerating) {
         if (messages.isNotEmpty()) listState.animateScrollToItem(messages.lastIndex)
     }
 
     Column(
         modifier = modifier.fillMaxSize()
-            .background(
-                Brush.verticalGradient(
-                    listOf(Color(0xFF100C1B), ChatInk, ChatInk)
-                )
-            )
+            .background(Brush.verticalGradient(listOf(Color(0xFF100C1B), ChatInk, ChatInk)))
             .imePadding()
     ) {
-        // Premium conversation header
+        // Independent chat-room top bar. The app's main navigation is not part of this screen.
         Row(
-            modifier = Modifier.fillMaxWidth().padding(start = 16.dp, end = 10.dp, top = 12.dp, bottom = 10.dp),
+            modifier = Modifier.fillMaxWidth()
+                .statusBarsPadding()
+                .padding(start = 8.dp, end = 10.dp, top = 5.dp, bottom = 7.dp),
             verticalAlignment = Alignment.CenterVertically
         ) {
-            Box(
-                Modifier.size(46.dp).clip(RoundedCornerShape(16.dp))
-                    .background(Brush.linearGradient(listOf(Color(0xFFB49AFF), Color(0xFF603BA7)))),
-                contentAlignment = Alignment.Center
-            ) {
-                Icon(Icons.Rounded.AutoAwesome, null, tint = Color.White, modifier = Modifier.size(24.dp))
+            IconButton(onClick = onBack, modifier = Modifier.size(40.dp)) {
+                Icon(Icons.Rounded.ArrowForward, "رجوع", tint = ChatLilac, modifier = Modifier.size(21.dp))
             }
-            Spacer(Modifier.width(11.dp))
-            Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(2.dp)) {
-                Text("ARAM AI", color = Color.White, fontWeight = FontWeight.ExtraBold, fontSize = 17.sp, letterSpacing = 1.1.sp)
-                Text(
-                    chat.activeConversationTitle,
-                    color = ChatMuted,
-                    style = MaterialTheme.typography.labelMedium,
-                    maxLines = 1,
-                    overflow = TextOverflow.Ellipsis
-                )
+            Spacer(Modifier.width(5.dp))
+            Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(3.dp)) {
+                Text("Aram AI", color = Color.White, fontWeight = FontWeight.Bold, fontSize = 17.sp)
+                Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                    Box(
+                        Modifier.size(7.dp).clip(CircleShape)
+                            .background(if (engineLoaded) ChatGreen else ChatMuted)
+                    )
+                    Text(
+                        if (engineLoaded) "متصل" else "غير متصل",
+                        color = if (engineLoaded) ChatGreen else ChatMuted,
+                        style = MaterialTheme.typography.labelSmall
+                    )
+                    Text("·", color = ChatMuted, style = MaterialTheme.typography.labelSmall)
+                    Text(
+                        chat.activeConversationTitle.ifBlank { "محادثة جديدة" },
+                        color = ChatMuted,
+                        style = MaterialTheme.typography.labelSmall,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis
+                    )
+                }
             }
 
             Box {
                 IconButton(onClick = { showHistory = true }, enabled = !isGenerating) {
-                    Icon(Icons.Rounded.History, "سجل المحادثات", tint = ChatLilac)
+                    Icon(Icons.Rounded.History, "المحادثات", tint = ChatLilac)
                 }
                 DropdownMenu(expanded = showHistory, onDismissRequest = { showHistory = false }) {
                     DropdownMenuItem(
@@ -139,7 +153,9 @@ fun ChatScreen(modifier: Modifier = Modifier) {
                             text = {
                                 Column {
                                     Text(item.title.ifBlank { "محادثة جديدة" }, maxLines = 1, overflow = TextOverflow.Ellipsis)
-                                    if (item.id == activeId) Text("المحادثة الحالية", color = ChatViolet, style = MaterialTheme.typography.labelSmall)
+                                    if (item.id == activeId) {
+                                        Text("المحادثة الحالية", color = ChatViolet, style = MaterialTheme.typography.labelSmall)
+                                    }
                                 }
                             },
                             leadingIcon = {
@@ -158,18 +174,9 @@ fun ChatScreen(modifier: Modifier = Modifier) {
                 }
                 DropdownMenu(expanded = showHeaderMenu, onDismissRequest = { showHeaderMenu = false }) {
                     DropdownMenuItem(
-                        text = { Text("محادثة جديدة") },
-                        leadingIcon = { Icon(Icons.Rounded.Add, null) },
-                        onClick = { chat.newConversation(); showHeaderMenu = false },
-                        enabled = !isGenerating
-                    )
-                    DropdownMenuItem(
                         text = { Text("مشاركة المحادثة") },
                         leadingIcon = { Icon(Icons.Rounded.Share, null) },
-                        onClick = {
-                            shareTranscript(context, messages)
-                            showHeaderMenu = false
-                        },
+                        onClick = { shareTranscript(context, messages); showHeaderMenu = false },
                         enabled = messages.isNotEmpty() && !isGenerating
                     )
                     DropdownMenuItem(
@@ -182,50 +189,19 @@ fun ChatScreen(modifier: Modifier = Modifier) {
             }
         }
 
-        // Engine state strip
-        Surface(
-            color = if (engineLoaded) Color(0xFF10271F) else ChatPanelRaised,
-            shape = RoundedCornerShape(14.dp),
-            modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp)
-                .border(1.dp, if (engineLoaded) Color(0xFF285541) else Color(0xFF393047), RoundedCornerShape(14.dp))
-        ) {
-            Row(
-                Modifier.padding(horizontal = 13.dp, vertical = 9.dp),
-                verticalAlignment = Alignment.CenterVertically
-            ) {
-                Box(
-                    Modifier.size(8.dp).clip(CircleShape)
-                        .background(if (engineLoaded) ChatGreen else ChatMuted)
-                )
-                Spacer(Modifier.width(8.dp))
-                Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(1.dp)) {
-                    Text(
-                        if (engineLoaded) "المحرك جاهز" else "المحرك غير جاهز",
-                        color = if (engineLoaded) ChatGreen else ChatMuted,
-                        style = MaterialTheme.typography.labelMedium,
-                        fontWeight = FontWeight.SemiBold
-                    )
-                    Text(
-                        "Spark-X2.6-1.7B  •  معالجة محلية على الجهاز",
-                        color = ChatMuted,
-                        style = MaterialTheme.typography.labelSmall
-                    )
-                }
-                Text(if (engineLoaded) "متصل" else "متوقف", color = if (engineLoaded) ChatGreen else ChatMuted, style = MaterialTheme.typography.labelSmall)
-            }
-        }
+        HorizontalDivider(color = Color(0xFF292235), thickness = 1.dp)
 
-        // Modes and output limit
+        // Conversation controls stay inside the room and remain compact.
         Row(
-            modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 9.dp),
-            horizontalArrangement = Arrangement.spacedBy(7.dp),
+            modifier = Modifier.fillMaxWidth().padding(horizontal = 13.dp, vertical = 8.dp),
+            horizontalArrangement = Arrangement.spacedBy(6.dp),
             verticalAlignment = Alignment.CenterVertically
         ) {
             listOf("عادي", "تحليل", "برمجة").forEach { item ->
                 FilterChip(
                     selected = mode == item,
                     onClick = { chat.setMode(item) },
-                    label = { Text(item, fontSize = 12.sp) },
+                    label = { Text(item, fontSize = 11.sp) },
                     shape = RoundedCornerShape(12.dp),
                     colors = FilterChipDefaults.filterChipColors(
                         selectedContainerColor = UserBubble,
@@ -244,7 +220,7 @@ fun ChatScreen(modifier: Modifier = Modifier) {
             Box {
                 AssistChip(
                     onClick = { showTokenMenu = true },
-                    label = { Text("$maxTokens رمز", fontSize = 11.sp) },
+                    label = { Text("$maxTokens رمز", fontSize = 10.sp) },
                     shape = RoundedCornerShape(12.dp),
                     colors = AssistChipDefaults.assistChipColors(
                         labelColor = ChatLilac,
@@ -255,33 +231,27 @@ fun ChatScreen(modifier: Modifier = Modifier) {
                     listOf(64, 128, 256, 500, 768, 1000, 1500, 2000).forEach { count ->
                         DropdownMenuItem(
                             text = { Text("$count رمز") },
-                            onClick = { chat.updateMaxTokens(count); showTokenMenu = false }
+                            onClick = { chat.updateMaxTokens(count); showTokenMenu = false },
+                            enabled = !isGenerating
                         )
                     }
                 }
             }
         }
 
-        // Message timeline
         LazyColumn(
             state = listState,
             modifier = Modifier.weight(1f).fillMaxWidth(),
-            contentPadding = PaddingValues(start = 15.dp, end = 15.dp, top = 8.dp, bottom = 18.dp),
+            contentPadding = PaddingValues(start = 15.dp, end = 15.dp, top = 10.dp, bottom = 16.dp),
             verticalArrangement = Arrangement.spacedBy(14.dp)
         ) {
             if (messages.isEmpty()) {
-                item {
-                    EmptyConversation(
-                        onPrompt = { chat.updateDraft(it) }
-                    )
-                }
+                item { EmptyConversation(onPrompt = { chat.updateDraft(it) }) }
             }
             itemsIndexed(messages, key = { _, message -> message.id }) { index, message ->
-                val canRegenerate = !isGenerating &&
-                    message.role == "assistant" &&
-                    index == messages.lastIndex &&
-                    message.content.isNotBlank()
-                val canContinue = !isGenerating && message.role == "assistant" && index == messages.lastIndex && message.content.isNotBlank()
+                val canRegenerate = !isGenerating && message.role == "assistant" &&
+                    index == messages.lastIndex && message.content.isNotBlank()
+                val canContinue = canRegenerate
                 MessageBubble(
                     message = message,
                     onRegenerate = if (canRegenerate) ({ chat.regenerateLast() }) else null,
@@ -289,127 +259,105 @@ fun ChatScreen(modifier: Modifier = Modifier) {
                 )
             }
             if (isGenerating) {
-                item {
-                    Row(
-                        Modifier.fillMaxWidth().padding(horizontal = 5.dp, vertical = 2.dp),
-                        verticalAlignment = Alignment.CenterVertically,
-                        horizontalArrangement = Arrangement.spacedBy(9.dp)
+                item(key = "generation-status") {
+                    AnimatedVisibility(
+                        visible = !isCancelling,
+                        enter = fadeIn(tween(140)),
+                        exit = fadeOut(tween(240))
                     ) {
-                        CircularProgressIndicator(
-                            modifier = Modifier.size(16.dp),
-                            strokeWidth = 2.dp,
-                            color = ChatViolet
-                        )
-                        Text("ARAM AI يكتب الآن…", color = ChatLilac, style = MaterialTheme.typography.labelMedium)
-                        Spacer(Modifier.weight(1f))
-                        Text("جارٍ التوليد", color = ChatMuted, style = MaterialTheme.typography.labelSmall)
+                        Row(
+                            Modifier.fillMaxWidth().padding(horizontal = 5.dp, vertical = 3.dp),
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.spacedBy(9.dp)
+                        ) {
+                            CircularProgressIndicator(
+                                modifier = Modifier.size(17.dp),
+                                strokeWidth = 2.dp,
+                                color = ChatViolet
+                            )
+                            Text("جاري الكتابة…", color = ChatLilac, style = MaterialTheme.typography.bodySmall)
+                        }
                     }
                 }
             }
         }
 
-        AnimatedVisibility(
-            visible = error.isNotBlank(),
-            enter = fadeIn(),
-            exit = fadeOut()
-        ) {
+        AnimatedVisibility(visible = error.isNotBlank(), enter = fadeIn(), exit = fadeOut()) {
             Surface(
                 color = Color(0xFF351B29),
                 shape = RoundedCornerShape(12.dp),
-                modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 4.dp)
+                modifier = Modifier.fillMaxWidth().padding(horizontal = 14.dp, vertical = 4.dp)
             ) {
                 Text(error, color = ChatRed, style = MaterialTheme.typography.bodySmall, modifier = Modifier.padding(11.dp))
             }
         }
 
-        // Composer dock
-        Surface(
-            color = ChatPanel,
-            shape = RoundedCornerShape(topStart = 24.dp, topEnd = 24.dp),
-            tonalElevation = 8.dp,
-            modifier = Modifier.fillMaxWidth()
-                .border(width = 1.dp, color = Color(0xFF302640), shape = RoundedCornerShape(topStart = 24.dp, topEnd = 24.dp))
-        ) {
-            Column(
-                Modifier.navigationBarsPadding().padding(start = 13.dp, end = 13.dp, top = 12.dp, bottom = 9.dp),
-                verticalArrangement = Arrangement.spacedBy(8.dp)
+        // WhatsApp-inspired composer: expandable pill field + one circular send/stop control.
+        Surface(color = ChatInk, modifier = Modifier.fillMaxWidth()) {
+            Row(
+                modifier = Modifier.fillMaxWidth()
+                    .navigationBarsPadding()
+                    .padding(start = 12.dp, end = 12.dp, top = 9.dp, bottom = 9.dp),
+                verticalAlignment = Alignment.Bottom,
+                horizontalArrangement = Arrangement.spacedBy(9.dp)
             ) {
-                Row(verticalAlignment = Alignment.Bottom, horizontalArrangement = Arrangement.spacedBy(9.dp)) {
-                    Surface(
-                        color = ChatInk,
-                        shape = RoundedCornerShape(19.dp),
-                        modifier = Modifier.weight(1f)
-                            .border(1.dp, Color(0xFF403451), RoundedCornerShape(19.dp))
+                Surface(
+                    modifier = Modifier.weight(1f),
+                    color = ChatPanelRaised,
+                    shape = RoundedCornerShape(27.dp),
+                    border = androidx.compose.foundation.BorderStroke(1.dp, Color(0xFF403451))
+                ) {
+                    Box(
+                        modifier = Modifier.padding(horizontal = 16.dp, vertical = 10.dp),
+                        contentAlignment = Alignment.CenterStart
                     ) {
-                        OutlinedTextField(
+                        if (draft.isEmpty()) {
+                            Text("اكتب رسالتك…", color = ChatMuted, fontSize = 14.sp)
+                        }
+                        BasicTextField(
                             value = draft,
                             onValueChange = { chat.updateDraft(it) },
-                            modifier = Modifier.fillMaxWidth(),
-                            placeholder = {
-                                Text("اكتب رسالتك هنا…", color = ChatMuted, fontSize = 14.sp)
-                            },
+                            modifier = Modifier.fillMaxWidth().heightIn(min = 29.dp, max = 120.dp),
+                            textStyle = TextStyle(
+                                color = Color.White,
+                                fontSize = 15.sp,
+                                lineHeight = 22.sp
+                            ),
+                            cursorBrush = SolidColor(ChatLilac),
                             minLines = 1,
                             maxLines = 5,
-                            shape = RoundedCornerShape(19.dp),
                             keyboardOptions = KeyboardOptions(imeAction = ImeAction.Send),
-                            keyboardActions = KeyboardActions(onSend = { if (!isGenerating) chat.sendMessage() }),
-                            colors = OutlinedTextFieldDefaults.colors(
-                                focusedBorderColor = Color.Transparent,
-                                unfocusedBorderColor = Color.Transparent,
-                                disabledBorderColor = Color.Transparent,
-                                focusedContainerColor = ChatInk,
-                                unfocusedContainerColor = ChatInk,
-                                cursorColor = ChatLilac,
-                                focusedTextColor = Color.White,
-                                unfocusedTextColor = Color.White
+                            keyboardActions = KeyboardActions(
+                                onSend = {
+                                    if (isGenerating) chat.stopGeneration()
+                                    else if (draft.isNotBlank()) chat.sendMessage()
+                                }
                             )
                         )
                     }
-                    if (isGenerating) {
-                        FilledIconButton(
-                            onClick = { chat.stopGeneration() },
-                            modifier = Modifier.size(54.dp),
-                            shape = RoundedCornerShape(18.dp),
-                            colors = IconButtonDefaults.filledIconButtonColors(
-                                containerColor = Color(0xFF512332),
-                                contentColor = ChatRed
-                            )
-                        ) {
-                            Icon(Icons.Rounded.StopCircle, "إيقاف التوليد", modifier = Modifier.size(25.dp))
-                        }
-                    } else {
-                        FilledIconButton(
-                            onClick = { chat.sendMessage() },
-                            enabled = draft.isNotBlank() && engineLoaded,
-                            modifier = Modifier.size(54.dp),
-                            shape = RoundedCornerShape(18.dp),
-                            colors = IconButtonDefaults.filledIconButtonColors(
-                                containerColor = ChatViolet,
-                                contentColor = Color.White,
-                                disabledContainerColor = ChatPanelRaised,
-                                disabledContentColor = ChatMuted
-                            )
-                        ) {
-                            Icon(Icons.Rounded.Send, "إرسال الرسالة", modifier = Modifier.size(24.dp))
-                        }
-                    }
                 }
-                Row(
-                    Modifier.fillMaxWidth(),
-                    horizontalArrangement = Arrangement.SpaceBetween,
-                    verticalAlignment = Alignment.CenterVertically
+
+                FilledIconButton(
+                    onClick = {
+                        if (isGenerating) chat.stopGeneration() else chat.sendMessage()
+                    },
+                    enabled = if (isGenerating) true else draft.isNotBlank() && engineLoaded,
+                    modifier = Modifier.size(50.dp),
+                    shape = CircleShape,
+                    colors = IconButtonDefaults.filledIconButtonColors(
+                        containerColor = if (isGenerating) Color(0xFFD94C55) else ChatViolet,
+                        contentColor = Color.White,
+                        disabledContainerColor = ChatPanelRaised,
+                        disabledContentColor = ChatMuted
+                    )
                 ) {
-                    Text(
-                        if (engineLoaded) "محادثتك تبقى على هذا الجهاز" else "شغّل المحرك من الصفحة الرئيسية للبدء",
-                        color = ChatMuted,
-                        style = MaterialTheme.typography.labelSmall
-                    )
-                    Text(
-                        if (chat.budgetIsCapped) "المطلوب: $maxTokens · المتاح حاليًا: ${chat.effectiveMaxTokens}"
-                        else "حد الإخراج: $maxTokens رمز",
-                        color = if (chat.budgetIsCapped) Color(0xFFFFD18A) else ChatMuted,
-                        style = MaterialTheme.typography.labelSmall
-                    )
+                    AnimatedContent(targetState = isGenerating, label = "send-stop-control") { stopping ->
+                        Icon(
+                            if (stopping) Icons.Rounded.StopCircle else Icons.Rounded.ArrowUpward,
+                            contentDescription = if (stopping) "إيقاف التوليد" else "إرسال الرسالة",
+                            modifier = Modifier.size(23.dp)
+                        )
+                    }
                 }
             }
         }
@@ -473,129 +421,100 @@ private fun MessageBubble(
 ) {
     val context = LocalContext.current
     val isUser = message.role == "user"
-    var showActions by remember(message.id) { mutableStateOf(false) }
 
-    Row(
-        Modifier.fillMaxWidth(),
-        horizontalArrangement = if (isUser) Arrangement.Start else Arrangement.End
+    Column(
+        modifier = Modifier.fillMaxWidth().padding(vertical = 3.dp),
+        horizontalAlignment = if (isUser) Alignment.Start else Alignment.End,
+        verticalArrangement = Arrangement.spacedBy(6.dp)
     ) {
-        Column(
-            modifier = Modifier.fillMaxWidth(0.92f),
-            horizontalAlignment = if (isUser) Alignment.Start else Alignment.End,
-            verticalArrangement = Arrangement.spacedBy(5.dp)
+        Row(
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(7.dp)
+        ) {
+            Box(
+                Modifier.size(27.dp).clip(CircleShape)
+                    .background(if (isUser) UserBubble else Color(0xFF30234B)),
+                contentAlignment = Alignment.Center
+            ) {
+                Icon(
+                    if (isUser) Icons.Rounded.Memory else Icons.Rounded.AutoAwesome,
+                    null,
+                    tint = if (isUser) ChatLilac else ChatViolet,
+                    modifier = Modifier.size(14.dp)
+                )
+            }
+            Text(
+                if (isUser) "أنت" else "Aram AI",
+                color = if (isUser) ChatLilac else ChatGreen,
+                style = MaterialTheme.typography.labelSmall,
+                fontWeight = FontWeight.Bold
+            )
+            if (message.failed) {
+                Text("تعذر اكتمال الرد", color = ChatRed, style = MaterialTheme.typography.labelSmall)
+            }
+        }
+
+        Surface(
+            color = if (isUser) Color(0xFF211A32) else Color(0xFF14121D),
+            shape = RoundedCornerShape(17.dp),
+            border = androidx.compose.foundation.BorderStroke(
+                1.dp,
+                if (isUser) Color(0xFF594477) else Color(0xFF30283E)
+            ),
+            modifier = Modifier.fillMaxWidth(if (isUser) 0.91f else 0.985f)
         ) {
             Row(
-                verticalAlignment = Alignment.CenterVertically,
-                horizontalArrangement = Arrangement.spacedBy(7.dp)
+                modifier = Modifier.padding(horizontal = 15.dp, vertical = 13.dp),
+                verticalAlignment = Alignment.Top
             ) {
                 Box(
-                    Modifier.size(25.dp).clip(CircleShape)
-                        .background(if (isUser) UserBubble else Color(0xFF30234B)),
-                    contentAlignment = Alignment.Center
-                ) {
-                    Icon(
-                        if (isUser) Icons.Rounded.Memory else Icons.Rounded.AutoAwesome,
-                        null,
-                        tint = if (isUser) ChatLilac else ChatViolet,
-                        modifier = Modifier.size(14.dp)
+                    Modifier.width(3.dp).height(30.dp).clip(RoundedCornerShape(3.dp))
+                        .background(if (isUser) ChatViolet else ChatGreen)
+                )
+                Spacer(Modifier.width(10.dp))
+                SelectionContainer {
+                    Text(
+                        message.content,
+                        color = if (message.failed) Color(0xFFFFC2CC) else Color(0xFFF4F0FF),
+                        style = MaterialTheme.typography.bodyMedium,
+                        lineHeight = 24.sp
                     )
                 }
-                Text(
-                    if (isUser) "أنت" else "ARAM AI",
-                    color = if (isUser) ChatLilac else ChatGreen,
-                    style = MaterialTheme.typography.labelSmall,
-                    fontWeight = FontWeight.Bold
-                )
-                if (message.failed) {
-                    Text("توقف غير مكتمل", color = ChatRed, style = MaterialTheme.typography.labelSmall)
-                }
             }
+        }
 
-            Surface(
-                color = if (isUser) UserBubble else AssistantBubble,
-                shape = RoundedCornerShape(
-                    topStart = 19.dp,
-                    topEnd = 19.dp,
-                    bottomStart = if (isUser) 6.dp else 19.dp,
-                    bottomEnd = if (isUser) 19.dp else 6.dp
-                ),
-                border = androidx.compose.foundation.BorderStroke(
-                    1.dp,
-                    if (isUser) Color(0xFF5A3C88) else Color(0xFF30283E)
-                ),
-                modifier = Modifier.fillMaxWidth().animateContentSize()
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            TextButton(
+                onClick = {
+                    val clipboard = context.getSystemService(Context.CLIPBOARD_SERVICE) as android.content.ClipboardManager
+                    clipboard.setPrimaryClip(ClipData.newPlainText("ARAM AI", message.content))
+                },
+                contentPadding = PaddingValues(horizontal = 7.dp, vertical = 0.dp),
+                enabled = message.content.isNotBlank()
             ) {
-                Column(
-                    Modifier.padding(horizontal = 15.dp, vertical = 12.dp),
-                    verticalArrangement = Arrangement.spacedBy(9.dp)
-                ) {
-                    if (message.content.isBlank() && !isUser) {
-                        Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(9.dp)) {
-                            CircularProgressIndicator(Modifier.size(15.dp), strokeWidth = 2.dp, color = ChatViolet)
-                            Text("يتم إعداد الرد…", color = ChatMuted, style = MaterialTheme.typography.bodySmall)
-                        }
-                    } else {
-                        SelectionContainer {
-                            Text(
-                                message.content,
-                                color = if (message.failed) Color(0xFFFFC2CC) else Color(0xFFF4F0FF),
-                                style = MaterialTheme.typography.bodyMedium,
-                                lineHeight = 24.sp
-                            )
-                        }
-                    }
-
-                    if (!isUser && message.durationMs != null) {
-                        HorizontalDivider(color = Color(0xFF342B43))
-                        Row(
-                            Modifier.fillMaxWidth(),
-                            horizontalArrangement = Arrangement.spacedBy(12.dp),
-                            verticalAlignment = Alignment.CenterVertically
-                        ) {
-                            Text("${message.durationMs / 1000.0}s", color = ChatMuted, style = MaterialTheme.typography.labelSmall)
-                            Text("أول مقطع: ${message.firstChunkMs ?: "—"} ms", color = ChatMuted, style = MaterialTheme.typography.labelSmall)
-                            Text("${String.format("%.1f", message.chunksPerSecond ?: 0.0)} مقطع/ث", color = ChatMuted, style = MaterialTheme.typography.labelSmall)
-                        }
-                    }
+                Icon(Icons.Rounded.ContentCopy, null, tint = ChatMuted, modifier = Modifier.size(14.dp))
+                Spacer(Modifier.width(4.dp))
+                Text("نسخ", color = ChatMuted, style = MaterialTheme.typography.labelSmall)
+            }
+            TextButton(
+                onClick = { shareMessage(context, message) },
+                contentPadding = PaddingValues(horizontal = 7.dp, vertical = 0.dp),
+                enabled = message.content.isNotBlank()
+            ) {
+                Icon(Icons.Rounded.Share, null, tint = ChatMuted, modifier = Modifier.size(14.dp))
+                Spacer(Modifier.width(4.dp))
+                Text("مشاركة", color = ChatMuted, style = MaterialTheme.typography.labelSmall)
+            }
+            if (onRegenerate != null) {
+                TextButton(onClick = onRegenerate, contentPadding = PaddingValues(horizontal = 7.dp, vertical = 0.dp)) {
+                    Icon(Icons.Rounded.Refresh, null, tint = ChatViolet, modifier = Modifier.size(14.dp))
+                    Spacer(Modifier.width(4.dp))
+                    Text("إعادة", color = ChatLilac, style = MaterialTheme.typography.labelSmall)
                 }
             }
-
-            Row(verticalAlignment = Alignment.CenterVertically) {
-                TextButton(
-                    onClick = {
-                        val clipboard = context.getSystemService(Context.CLIPBOARD_SERVICE) as android.content.ClipboardManager
-                        clipboard.setPrimaryClip(ClipData.newPlainText("ARAM AI", message.content))
-                    },
-                    contentPadding = PaddingValues(horizontal = 7.dp, vertical = 0.dp),
-                    enabled = message.content.isNotBlank()
-                ) {
-                    Icon(Icons.Rounded.ContentCopy, null, tint = ChatMuted, modifier = Modifier.size(14.dp))
-                    Spacer(Modifier.width(4.dp))
-                    Text("نسخ", color = ChatMuted, style = MaterialTheme.typography.labelSmall)
-                }
-                TextButton(
-                    onClick = { shareMessage(context, message) },
-                    contentPadding = PaddingValues(horizontal = 7.dp, vertical = 0.dp),
-                    enabled = message.content.isNotBlank()
-                ) {
-                    Icon(Icons.Rounded.Share, null, tint = ChatMuted, modifier = Modifier.size(14.dp))
-                    Spacer(Modifier.width(4.dp))
-                    Text("مشاركة", color = ChatMuted, style = MaterialTheme.typography.labelSmall)
-                }
-                if (onRegenerate != null) {
-                    TextButton(
-                        onClick = onRegenerate,
-                        contentPadding = PaddingValues(horizontal = 7.dp, vertical = 0.dp)
-                    ) {
-                        Icon(Icons.Rounded.Refresh, null, tint = ChatViolet, modifier = Modifier.size(14.dp))
-                        Spacer(Modifier.width(4.dp))
-                        Text("إعادة", color = ChatLilac, style = MaterialTheme.typography.labelSmall)
-                    }
-                }
-                if (onContinue != null) {
-                    TextButton(onClick = onContinue, contentPadding = PaddingValues(horizontal = 7.dp, vertical = 0.dp)) {
-                        Text("متابعة الرد", color = ChatLilac, style = MaterialTheme.typography.labelSmall)
-                    }
+            if (onContinue != null) {
+                TextButton(onClick = onContinue, contentPadding = PaddingValues(horizontal = 7.dp, vertical = 0.dp)) {
+                    Text("متابعة الرد", color = ChatLilac, style = MaterialTheme.typography.labelSmall)
                 }
             }
         }

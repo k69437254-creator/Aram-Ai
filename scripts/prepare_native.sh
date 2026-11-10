@@ -28,6 +28,7 @@ NATIVE_FILES=(
   common/chat.h
   common/chat.cpp
   examples/llama.android/lib/src/main/java/com/arm/aichat/internal/InferenceEngineImpl.kt
+  examples/llama.android/lib/src/main/java/com/arm/aichat/InferenceEngine.kt
 )
 for rel in "${NATIVE_FILES[@]}"; do
   mkdir -p "$NATIVE_BACKUP/$(dirname "$rel")"
@@ -55,7 +56,8 @@ cpp = root / "examples/llama.android/lib/src/main/cpp/ai_chat.cpp"
 chat_h = root / "common/chat.h"
 chat_cpp = root / "common/chat.cpp"
 kotlin = root / "examples/llama.android/lib/src/main/java/com/arm/aichat/internal/InferenceEngineImpl.kt"
-for path in (cpp, chat_h, chat_cpp, kotlin):
+engine_api = root / "examples/llama.android/lib/src/main/java/com/arm/aichat/InferenceEngine.kt"
+for path in (cpp, chat_h, chat_cpp, kotlin, engine_api):
     if not path.is_file():
         raise SystemExit(f"Missing expected file in verified llama.cpp {revision}: {path}")
 
@@ -369,9 +371,55 @@ if "ARAM_AI_READY_STATE_PATCH" not in k:
     k = k.replace(class_anchor, "// ARAM_AI_READY_STATE_PATCH\n" + class_anchor, 1)
     kotlin.write_text(k)
 
+# Add a public, per-request cancellation hook to the pinned Android binding.
+# ModelRuntime calls beginGeneration() at the serialized request boundary and
+# cancelGeneration() only for that request's active native flow.
+api = engine_api.read_text()
+api_marker = "// ARAM_AI_CANCEL_GENERATION_API"
+if api_marker not in api:
+    api_anchor = "    fun sendUserPrompt(message: String, predictLength: Int = DEFAULT_PREDICT_LENGTH): Flow<String>\n"
+    if api.count(api_anchor) != 1:
+        raise SystemExit("Cannot uniquely locate InferenceEngine.sendUserPrompt")
+    api = api.replace(
+        api_anchor,
+        "    /** Reset the cancellation flag before one serialized generation. */\n    fun beginGeneration()\n\n    /** Stop the active generation after the current native decode step. */\n    fun cancelGeneration()\n\n" + api_marker + "\n" + api_anchor,
+        1
+    )
+if api.count("fun beginGeneration()") != 1 or api.count("fun cancelGeneration()") != 1:
+    raise SystemExit("InferenceEngine cancellation API verification failed")
+engine_api.write_text(api)
+
+impl = kotlin.read_text()
+impl_marker = "// ARAM_AI_CANCEL_GENERATION_PATCH"
+if impl_marker not in impl:
+    send_anchor = "    override fun sendUserPrompt(\n"
+    if impl.count(send_anchor) != 1:
+        raise SystemExit("Cannot uniquely locate InferenceEngineImpl.sendUserPrompt")
+    cancel_methods = """    override fun beginGeneration() {
+        _cancelGeneration = false
+    }
+
+    override fun cancelGeneration() {
+        _cancelGeneration = true
+    }
+
+"""
+    impl = impl.replace(send_anchor, impl_marker + "\n" + cancel_methods + send_anchor, 1)
+if impl.count("override fun beginGeneration()") != 1 or impl.count("override fun cancelGeneration()") != 1:
+    raise SystemExit("InferenceEngineImpl native cancellation verification failed")
+reset_start = impl.find("override fun beginGeneration()")
+reset_end = impl.find("override fun cancelGeneration()", reset_start)
+if reset_start < 0 or reset_end < 0 or "_cancelGeneration = false" not in impl[reset_start:reset_end]:
+    raise SystemExit("Native per-request cancellation reset verification failed")
+if "@Volatile\n    private var _cancelGeneration = false" not in impl:
+    raise SystemExit("Native cancellation flag is not volatile in the pinned binding")
+kotlin.write_text(impl)
+
 assert marker in cpp.read_text()
 assert h_marker in chat_h.read_text()
 assert cc_marker in chat_cpp.read_text()
 assert "_readyForSystemPrompt = true" in kotlin.read_text()
+assert "fun beginGeneration()" in engine_api.read_text() and "fun cancelGeneration()" in engine_api.read_text()
+assert "override fun beginGeneration()" in kotlin.read_text() and "override fun cancelGeneration()" in kotlin.read_text()
 print(f"Patched Spark-X2.6 Jinja handling without changing the verified llama.cpp revision {revision}")
 PY

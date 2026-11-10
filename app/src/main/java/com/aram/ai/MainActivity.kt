@@ -9,6 +9,10 @@ import android.content.pm.PackageManager
 import android.os.Build
 import android.os.Bundle
 import androidx.activity.ComponentActivity
+import androidx.compose.animation.slideOutHorizontally
+import androidx.compose.animation.slideInHorizontally
+import androidx.compose.animation.AnimatedVisibility
+import androidx.activity.compose.BackHandler
 import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
 import androidx.compose.animation.AnimatedContent
@@ -94,30 +98,61 @@ private fun AramAiTheme(content: @Composable () -> Unit) {
 @Composable
 private fun AramAiRoot() {
     var selectedTab by remember { mutableIntStateOf(0) }
-    Scaffold(
-        containerColor = Ink,
-        bottomBar = {
-            NavigationBar(containerColor = Panel, contentColor = Lilac) {
-                NavigationBarItem(selected = selectedTab == 0, onClick = { selectedTab = 0 }, icon = { Icon(Icons.Rounded.Home, null) }, label = { Text("الرئيسية") })
-                NavigationBarItem(selected = selectedTab == 1, onClick = { selectedTab = 1 }, icon = { Icon(Icons.Rounded.Memory, null) }, label = { Text("المحادثة") })
-                NavigationBarItem(selected = selectedTab == 2, onClick = { selectedTab = 2 }, icon = { Icon(Icons.Rounded.Speed, null) }, label = { Text("المطوّر") })
-                NavigationBarItem(selected = selectedTab == 3, onClick = { selectedTab = 3 }, icon = { Icon(Icons.Rounded.Key, null) }, label = { Text("مفاتيح API") })
-                NavigationBarItem(selected = selectedTab == 4, onClick = { selectedTab = 4 }, icon = { Icon(Icons.Rounded.Settings, null) }, label = { Text("الإعدادات") })
+    var returnTab by remember { mutableIntStateOf(0) }
+    var chatRoomOpen by remember { mutableStateOf(false) }
+
+    val closeChatRoom = {
+        chatRoomOpen = false
+        selectedTab = returnTab
+    }
+    BackHandler(enabled = chatRoomOpen, onBack = closeChatRoom)
+
+    Box(Modifier.fillMaxSize().background(Ink)) {
+        AnimatedVisibility(
+            visible = !chatRoomOpen,
+            enter = fadeIn(tween(180)),
+            exit = fadeOut(tween(150)),
+            modifier = Modifier.fillMaxSize()
+        ) {
+            Scaffold(
+                containerColor = Ink,
+                bottomBar = {
+                    NavigationBar(containerColor = Panel, contentColor = Lilac) {
+                        NavigationBarItem(selected = selectedTab == 0, onClick = { selectedTab = 0 }, icon = { Icon(Icons.Rounded.Home, null) }, label = { Text("الرئيسية") })
+                        NavigationBarItem(
+                            selected = false,
+                            onClick = { returnTab = selectedTab; chatRoomOpen = true },
+                            icon = { Icon(Icons.Rounded.Memory, null) },
+                            label = { Text("المحادثة") }
+                        )
+                        NavigationBarItem(selected = selectedTab == 2, onClick = { selectedTab = 2 }, icon = { Icon(Icons.Rounded.Speed, null) }, label = { Text("المطوّر") })
+                        NavigationBarItem(selected = selectedTab == 3, onClick = { selectedTab = 3 }, icon = { Icon(Icons.Rounded.Key, null) }, label = { Text("مفاتيح API") })
+                        NavigationBarItem(selected = selectedTab == 4, onClick = { selectedTab = 4 }, icon = { Icon(Icons.Rounded.Settings, null) }, label = { Text("الإعدادات") })
+                    }
+                }
+            ) { padding ->
+                AnimatedContent(
+                    targetState = selectedTab,
+                    transitionSpec = { fadeIn(tween(180)) togetherWith fadeOut(tween(120)) },
+                    label = "aram-ai-pages"
+                ) { tab ->
+                    when (tab) {
+                        0 -> DashboardScreen(Modifier.padding(padding))
+                        2 -> DeveloperScreen(Modifier.padding(padding))
+                        3 -> ApiKeysScreen(Modifier.padding(padding))
+                        else -> SettingsScreen(Modifier.padding(padding))
+                    }
+                }
             }
         }
-    ) { padding ->
-        AnimatedContent(
-            targetState = selectedTab,
-            transitionSpec = { fadeIn(tween(180)) togetherWith fadeOut(tween(120)) },
-            label = "aram-ai-pages"
-        ) { tab ->
-            when (tab) {
-                0 -> DashboardScreen(Modifier.padding(padding))
-                1 -> ChatScreen(Modifier.padding(padding))
-                2 -> DeveloperScreen(Modifier.padding(padding))
-                3 -> ApiKeysScreen(Modifier.padding(padding))
-                else -> SettingsScreen(Modifier.padding(padding))
-            }
+
+        AnimatedVisibility(
+            visible = chatRoomOpen,
+            enter = slideInHorizontally(initialOffsetX = { it }, animationSpec = tween(270)) + fadeIn(tween(220)),
+            exit = slideOutHorizontally(targetOffsetX = { it / 4 }, animationSpec = tween(230)) + fadeOut(tween(180)),
+            modifier = Modifier.fillMaxSize()
+        ) {
+            ChatScreen(onBack = closeChatRoom, modifier = Modifier.fillMaxSize())
         }
     }
 }
@@ -399,7 +434,7 @@ private fun SettingsScreen(modifier: Modifier = Modifier) {
             Surface(color = Panel, shape = RoundedCornerShape(20.dp), modifier = Modifier.fillMaxWidth()) {
                 Column(Modifier.padding(18.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
                     Text("حول Aram AI", fontWeight = FontWeight.SemiBold)
-                    Text("الإصدار 0.4.0 · Spark-X2.6-1.7B · llama.cpp Android binding", color = Muted, style = MaterialTheme.typography.bodySmall)
+                    Text("الإصدار 0.5.0 · Spark-X2.6-1.7B · llama.cpp Android binding", color = Muted, style = MaterialTheme.typography.bodySmall)
                     Text("أثناء تشغيل الخادم يبقى المعالج مستيقظًا حتى مع إطفاء الشاشة؛ قد يزيد ذلك استهلاك البطارية.", color = Lilac, style = MaterialTheme.typography.bodySmall)
                     Text("حصص مفاتيح العملاء اليومية مفعّلة محليًا. الوصول العام عبر الإنترنت وTLS والفوترة وإدارة العملاء التجارية المركزية ليست مفعّلة.", color = Muted, style = MaterialTheme.typography.bodySmall)
                 }

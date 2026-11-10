@@ -2,8 +2,6 @@ package com.aram.ai.ui
 
 import android.app.Application
 import android.content.Context
-import android.os.Handler
-import android.os.Looper
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateListOf
 import androidx.compose.runtime.mutableStateOf
@@ -17,11 +15,11 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.NonCancellable
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.withContext
 import org.json.JSONArray
 import org.json.JSONObject
 import java.util.UUID
-import java.util.concurrent.atomic.AtomicBoolean
 
 data class ChatMessage(
     val id: String,
@@ -66,6 +64,8 @@ class ChatViewModel(application: Application) : AndroidViewModel(application) {
     val effectiveMaxTokens: Int get() = maxTokens.coerceAtMost(MAX_SAFE_OUTPUT_TOKENS)
     val budgetIsCapped: Boolean get() = maxTokens > effectiveMaxTokens
     var isGenerating by mutableStateOf(false)
+        private set
+    var isCancelling by mutableStateOf(false)
         private set
     var error by mutableStateOf("")
         private set
@@ -141,7 +141,11 @@ class ChatViewModel(application: Application) : AndroidViewModel(application) {
         }
     }
 
-    fun stopGeneration() { activeJob?.cancel() }
+    fun stopGeneration() {
+        if (!isGenerating || isCancelling) return
+        isCancelling = true
+        activeJob?.cancel()
+    }
 
     /** Requests a continuation using the existing conversation history, without replaying from scratch. */
     fun continueLast() {
@@ -173,13 +177,13 @@ class ChatViewModel(application: Application) : AndroidViewModel(application) {
         }
 
         error = ""
+        isCancelling = false
         messages.add(ChatMessage(UUID.randomUUID().toString(), "user", userText))
-        val assistantId = UUID.randomUUID().toString()
-        messages.add(ChatMessage(assistantId, "assistant", ""))
         draft = ""
         isGenerating = true
 
-        val previous = messages.dropLast(2).takeLast(14)
+        // Only completed assistant messages enter the conversation history.
+        val previous = messages.dropLast(1).takeLast(14)
         val prompt = buildString {
             previous.forEach { message ->
                 if (message.content.isNotBlank()) {
@@ -203,8 +207,6 @@ class ChatViewModel(application: Application) : AndroidViewModel(application) {
         var firstChunkAt: Long? = null
         var chunkCount = 0
         val answer = StringBuilder()
-        val mainHandler = Handler(Looper.getMainLooper())
-        val generationFinished = AtomicBoolean(false)
 
         activeJob = viewModelScope.launch {
             try {
@@ -212,47 +214,41 @@ class ChatViewModel(application: Application) : AndroidViewModel(application) {
                     if (firstChunkAt == null) firstChunkAt = System.nanoTime()
                     answer.append(piece)
                     chunkCount++
-                    val snapshot = answer.toString()
-                    mainHandler.post {
-                        if (!generationFinished.get()) {
-                            val index = messages.indexOfFirst { it.id == assistantId }
-                            if (index >= 0) messages[index] = messages[index].copy(content = snapshot)
-                        }
-                    }
                 }
                 val elapsed = ((System.nanoTime() - started) / 1_000_000L).coerceAtLeast(1L)
                 val firstLatency = firstChunkAt?.let { ((it - started) / 1_000_000L).coerceAtLeast(0L) }
                 val rate = chunkCount.toDouble() / (elapsed / 1000.0)
-                generationFinished.set(true)
                 withContext(Dispatchers.Main.immediate) {
-                    val index = messages.indexOfFirst { it.id == assistantId }
-                    if (index >= 0) messages[index] = messages[index].copy(
-                        content = result.ifBlank { "لم يُنتج النموذج نصًا في هذا الطلب." },
-                        durationMs = elapsed,
-                        chunksPerSecond = rate,
-                        firstChunkMs = firstLatency
+                    messages.add(
+                        ChatMessage(
+                            id = UUID.randomUUID().toString(),
+                            role = "assistant",
+                            content = result.ifBlank { "لم يُنتج النموذج نصًا في هذا الطلب." },
+                            durationMs = elapsed,
+                            chunksPerSecond = rate,
+                            firstChunkMs = firstLatency
+                        )
                     )
                     persistActive()
                 }
             } catch (cancelled: CancellationException) {
-                generationFinished.set(true)
                 withContext(NonCancellable + Dispatchers.Main.immediate) {
-                    val index = messages.indexOfFirst { it.id == assistantId }
-                    if (index >= 0) messages[index] = messages[index].copy(
-                        content = answer.toString() + if (answer.isNotEmpty()) "\n\n[أُوقف التوليد]" else "أُوقف التوليد.",
-                        failed = true
-                    )
+                    // Let the loading indicator finish its fade-out; no partial reply is kept.
+                    delay(260L)
+                    messages.removeAll { it.role == "assistant" && it.content.isBlank() }
                     persistActive()
                 }
                 throw cancelled
             } catch (failure: Throwable) {
-                generationFinished.set(true)
                 withContext(Dispatchers.Main.immediate) {
-                    val index = messages.indexOfFirst { it.id == assistantId }
                     val detail = failure.message ?: failure.javaClass.simpleName
-                    if (index >= 0) messages[index] = messages[index].copy(
-                        content = answer.toString().ifBlank { "تعذر توليد الإجابة: $detail" },
-                        failed = true
+                    messages.add(
+                        ChatMessage(
+                            id = UUID.randomUUID().toString(),
+                            role = "assistant",
+                            content = answer.toString().ifBlank { "تعذر توليد الإجابة: $detail" },
+                            failed = true
+                        )
                     )
                     error = "فشل التوليد: $detail"
                     persistActive()
@@ -260,6 +256,7 @@ class ChatViewModel(application: Application) : AndroidViewModel(application) {
             } finally {
                 withContext(NonCancellable + Dispatchers.Main.immediate) {
                     isGenerating = false
+                    isCancelling = false
                     activeJob = null
                 }
             }
@@ -367,10 +364,8 @@ class ChatViewModel(application: Application) : AndroidViewModel(application) {
                     failed = m.optBoolean("failed", false)
                 ))
             }
-            // A process death during inference must not leave a permanent blank bubble.
-            val restored = list.map { msg ->
-                if (msg.role == "assistant" && msg.content.isBlank()) msg.copy(content = "انقطع التوليد قبل اكتمال الإجابة.", failed = true) else msg
-            }.toMutableList()
+            // Discard empty assistant placeholders left by an older interrupted generation.
+            val restored = list.filterNot { msg -> msg.role == "assistant" && msg.content.isBlank() }.toMutableList()
             storedMessages[id] = restored
             storedTitles[id] = item.optString("title", "محادثة جديدة")
             storedTimes[id] = item.optLong("updatedAt", 0L)

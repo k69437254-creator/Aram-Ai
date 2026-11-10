@@ -60,7 +60,7 @@ if git diff --cached --quiet; then
   exit 0
 fi
 
-git commit -m "Aram AI 0.4.0: persistent chat and owner-priority API"
+git commit -m "Aram AI 0.5.0: immersive chat room and native cancellation"
 git push origin "$BRANCH"
 echo
 echo "تم رفع تحديث Aram AI بنجاح. راقب GitHub Actions لبناء APK جديد."
